@@ -1,0 +1,24 @@
+{
+  "name": "StagePro Default",
+  "version": 1,
+
+  "colors": {
+    "background": "#000000",
+    "lyrics": "#FFFFFF",
+    "chords": "#FFD166",
+
+    "section.verse": "#FFFFFF",
+    "section.chorus": "#2EEA72",
+    "section.comment": "#AAAAAA",
+
+    "directive.title": "#FFFFFF",
+    "directive.subtitle": "#BBBBBB",
+    "directive.meta": "#888888"
+  },
+
+  "styles": {
+    "section.chorus": ["bold"],
+    "directive.title": ["bold"],
+    "section.comment": ["italic"]
+  }
+}

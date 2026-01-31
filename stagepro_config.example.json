@@ -1,0 +1,31 @@
+{
+  "songs_dir": "songs",
+  "setlist_filename": "setlist.txt",
+
+  "theme": "themes/dark.json",
+
+  "ui": {
+    "fullscreen": true,
+    "padding_x": 36,
+    "padding_y": 24,
+
+    "rotation_degrees": 0,
+    "scale_mode": "fill"
+  },
+
+  "font": {
+    "family": "DejaVu Sans",
+    "size_px": 34,
+    "line_height": 1.15,
+    "chord_size_factor": 0.70,
+    "chord_pad_em": 0.95
+  },
+
+  "controls": {
+    "next_page_keys": ["PgDown", "Right"],
+    "prev_page_keys": ["PgUp", "Left"],
+
+    "exit_hold_ms": 1200,
+    "exit_combo": ["PgUp+PgDn", "Left+Right"]
+  }
+}

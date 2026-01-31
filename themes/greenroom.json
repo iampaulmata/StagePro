@@ -1,0 +1,22 @@
+{
+  "name": "Green Room",
+  "version": 1,
+  "colors": {
+    "background": "#062B1B",
+    "lyrics": "#EFFFF7",
+    "text": "#EFFFF7",
+    "chords": "#FFD966",
+
+    "directive.title": "#FFFFFF",
+    "directive.subtitle": "#D7F5E6",
+    "directive.meta": "#A8D7C4",
+
+    "section.verse": "#EFFFF7",
+    "section.chorus": "#7CFFA6",
+    "section.chorus_border": "#7CFFA6",
+    "section.comment": "#C6EBDD",
+
+    "footer": "#BFE7D7",
+    "hint": "#9BCDBA"
+  }
+}

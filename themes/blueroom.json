@@ -1,0 +1,22 @@
+{
+  "name": "Blue Room",
+  "version": 1,
+  "colors": {
+    "background": "#061A33",
+    "lyrics": "#EAF2FF",
+    "text": "#EAF2FF",
+    "chords": "#FFD966",
+
+    "directive.title": "#FFFFFF",
+    "directive.subtitle": "#D6E6FF",
+    "directive.meta": "#A7C4F2",
+
+    "section.verse": "#EAF2FF",
+    "section.chorus": "#66D9FF",
+    "section.chorus_border": "#66D9FF",
+    "section.comment": "#C7DAF7",
+
+    "footer": "#C2D6F7",
+    "hint": "#9DB9E6"
+  }
+}

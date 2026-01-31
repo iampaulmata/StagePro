@@ -1,0 +1,22 @@
+{
+  "name": "StagePro Dark",
+  "version": 1,
+  "colors": {
+    "background": "#000000",
+    "lyrics": "#FFFFFF",
+    "text": "#FFFFFF",
+    "chords": "#FFD966",
+
+    "directive.title": "#FFFFFF",
+    "directive.subtitle": "#CFCFCF",
+    "directive.meta": "#9E9E9E",
+
+    "section.verse": "#FFFFFF",
+    "section.chorus": "#2EEA72",
+    "section.chorus_border": "#2EEA72",
+    "section.comment": "#B0B0B0",
+
+    "footer": "#B0B0B0",
+    "hint": "#8E8E8E"
+  }
+}

@@ -1,0 +1,77 @@
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python build / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# =========================
+# OS / Editor junk
+# =========================
+.DS_Store
+Thumbs.db
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# PyCharm / JetBrains
+.idea/
+
+# Vim
+*.swp
+*.swo
+*~
+
+# =========================
+# StagePro runtime files
+# =========================
+
+# Local config (user-specific)
+stagepro_config.json
+
+# Runtime caches / generated files
+.cache/
+.cache-stagepro/
+logs/
+*.log
+
+# =========================
+# Songs (IGNORE ALL SONG FILES)
+# =========================
+songs/**
+
+# Keep folder present in repo (optional)
+!songs/.gitkeep
+
+# =========================
+# Themes
+# =========================
+themes/_local/
+themes/_scratch/
+
+# =========================
+# Packaging / deployment
+# =========================
+*.spec
+*.AppImage
+*.exe
+*.bin
+
+# =========================
+# Misc
+# =========================
+*.tmp
+*.temp

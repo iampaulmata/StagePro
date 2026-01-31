@@ -1,0 +1,24 @@
+{
+  "name": "StagePro Light",
+  "version": 1,
+  "colors": {
+    "background": "#FFFFFF",
+
+    "lyrics": "#111111",
+    "text": "#111111",
+    "section.verse": "#111111",
+
+    "chords": "#1B5E20",
+
+    "directive.title": "#000000",
+    "directive.subtitle": "#333333",
+    "directive.meta": "#555555",
+
+    "section.chorus": "#0B5FFF",
+    "section.chorus_border": "#0B5FFF",
+    "section.comment": "#444444",
+
+    "footer": "#555555",
+    "hint": "#666666"
+  }
+}
