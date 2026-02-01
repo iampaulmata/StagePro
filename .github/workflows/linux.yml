@@ -24,6 +24,14 @@ jobs:
         run: |
           chmod +x packaging/get_appimage_tools.sh
           ./packaging/get_appimage_tools.sh
+        
+      - name: Debug paths (pre-build)
+        run: |
+          pwd
+          ls -la
+          ls -la themes || true
+          ls -la assets || true
+          ls -la packaging || true
 
       - name: Build AppImage
         env:
