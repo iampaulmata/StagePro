@@ -15,6 +15,8 @@ APPIMAGETOOL="$TOOLS_DIR/appimagetool-x86_64.AppImage"
 APPDIR="$ROOT/AppDir"
 DIST_ONEDIR="$ROOT/dist/stagepro"
 
+echo "PWD before pyinstaller: $(pwd)"
+
 # ---------- build PyInstaller bundle ----------
 ./packaging/build_pyinstaller.sh
 
