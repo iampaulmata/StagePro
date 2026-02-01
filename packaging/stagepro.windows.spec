@@ -1,20 +1,26 @@
-# stagepro.windows.spec
-# Build with: pyinstaller stagepro.windows.spec --clean
+# packaging/stagepro.windows.spec
+# Build with: pyinstaller packaging/stagepro.windows.spec --clean
 
-from PyInstaller.utils.hooks import collect_qt_plugins
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 
-qt_platform_plugins = collect_qt_plugins("PySide6", "platforms")
-qt_image_plugins    = collect_qt_plugins("PySide6", "imageformats")
+# Let PyInstaller's PySide6 hooks do the heavy lifting.
+# We just make sure plugins/dlls and our app data are present.
+
+pyside6_bins = collect_dynamic_libs("PySide6")
+pyside6_data = collect_data_files("PySide6")
 
 a = Analysis(
     ["stagepro.py"],
     pathex=["."],
-    binaries=qt_platform_plugins + qt_image_plugins,
-    datas=[
-        ("themes", "themes"),
-        ("assets", "assets"),
-        ("stagepro_config.example.json", "."),
-    ],
+    binaries=pyside6_bins,
+    datas=(
+        pyside6_data
+        + [
+            ("themes", "themes"),
+            ("assets", "assets"),
+            ("stagepro_config.example.json", "."),
+        ]
+    ),
     hiddenimports=[],
     hookspath=[],
     runtime_hooks=[],
@@ -32,9 +38,9 @@ exe = EXE(
     name="StagePro",
     debug=False,
     strip=False,
-    upx=False,          # keep false in CI for fewer surprises
+    upx=False,
     console=False,
-    icon="assets/stagepro.ico",   # we’ll generate this in CI
+    icon="assets/stagepro.ico",
 )
 
 coll = COLLECT(
