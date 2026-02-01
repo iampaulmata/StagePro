@@ -24,18 +24,14 @@ jobs:
         run: |
           chmod +x packaging/get_appimage_tools.sh
           ./packaging/get_appimage_tools.sh
-          
-      - name: Show linux spec datas lines
-        run: |
-          sed -n '1,120p' packaging/stagepro.linux.spec
-
 
       - name: Build AppImage
         env:
           VERSION: ${{ github.ref_name }}
         run: |
           chmod +x packaging/build_pyinstaller.sh packaging/build_appimage.sh
-          # cd "$GITHUB_WORKSPACE"
+          cd "$GITHUB_WORKSPACE"
+          echo "PWD before pyinstaller: $(pwd)"
           ./packaging/build_appimage.sh
 
       - uses: actions/upload-artifact@v4
