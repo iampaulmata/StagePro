@@ -1,4 +1,3 @@
-cat > packaging/appimage/stagepro.desktop <<'EOF'
 [Desktop Entry]
 Type=Application
 Name=StagePro
@@ -7,4 +6,3 @@ Exec=stagepro
 Icon=stagepro
 Categories=AudioVideo;Music;
 Terminal=false
-EOF
