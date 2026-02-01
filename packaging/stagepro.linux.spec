@@ -2,7 +2,7 @@
 from pathlib import Path
 block_cipher = None
 
-ROOT = Path(SPECPATH).resolve().parent.parent
+ROOT = Path(SPECPATH).resolve().parent
 entry_script = str(ROOT / "stagepro.py")
 
 datas = [
