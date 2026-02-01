@@ -25,6 +25,7 @@ else
   exit 1
 fi
 
+echo "PWD before pyinstaller: $(pwd)"
 
 pyinstaller --clean --noconfirm "$SPEC"
 
