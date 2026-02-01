@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=StagePro
+Comment=ChordPro stage lyrics viewer with foot pedal control
+Exec=stagepro
+Icon=stagepro
+Categories=AudioVideo;Music;
+Terminal=false
