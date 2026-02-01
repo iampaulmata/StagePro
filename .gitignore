@@ -104,3 +104,15 @@ nuitka-build/
 
 # Python bytecode cache in unusual places
 *.pyo
+
+# AppImage / linuxdeploy artifacts
+AppDir/
+*.AppImage
+*.AppImage.sha256
+
+# Packaging tools (downloaded binaries)
+packaging/tools/
+
+# PyInstaller output
+/dist/
+/build/
