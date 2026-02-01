@@ -24,14 +24,11 @@ jobs:
         run: |
           chmod +x packaging/get_appimage_tools.sh
           ./packaging/get_appimage_tools.sh
-        
-      - name: Debug paths (pre-build)
+          
+      - name: Show linux spec datas lines
         run: |
-          pwd
-          ls -la
-          ls -la themes || true
-          ls -la assets || true
-          ls -la packaging || true
+          sed -n '1,120p' packaging/stagepro.linux.spec
+
 
       - name: Build AppImage
         env:
