@@ -9,19 +9,17 @@ ROOT = Path.cwd().resolve()
 entry_script = str(ROOT / "stagepro.py")
 
 datas = [
-    (str(ROOT / "themes"), "themes"),
-    (str(ROOT / "stagepro_config.example.json"), "."),
-    (str(ROOT / "README.md"), "."),
-    (str(ROOT / "LICENSE.md"), "."),
-    (str(ROOT / "CONTRIBUTORS.md"), "."),
-    ('themes', 'themes'),
-    ('assets', 'assets'),
-    ('stagepro_config.example.json', '.'),
+    ("themes", "themes"),
+    ("assets", "assets"),
+    ("stagepro_config.example.json", "."),
+    ("README.md", "."),
+    ("LICENSE.md", "."),
+    ("CONTRIBUTORS.md", "."),
 ]
 
 a = Analysis(
     [entry_script],
-    pathex=[str(ROOT)],
+    pathex=["."],
     binaries=[],
     datas=datas,
     hiddenimports=[],
