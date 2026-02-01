@@ -51,3 +51,10 @@ jobs:
         with:
           name: StagePro-windows-portable
           path: StagePro-*-windows-x64-portable.zip
+          
+      - name: Publish to GitHub Release (tag builds only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: StagePro-*-windows-x64-portable.zip
+
