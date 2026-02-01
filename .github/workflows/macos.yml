@@ -28,6 +28,7 @@ jobs:
 
       - name: Build (PyInstaller)
         run: |
+          cd "$GITHUB_WORKSPACE"
           rm -rf build dist
           pyinstaller packaging/stagepro.macos.spec --clean
 
