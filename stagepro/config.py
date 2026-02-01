@@ -3,9 +3,60 @@ import os
 import sys
 from pathlib import Path
 from typing import Tuple
+from PySide6.QtCore import QStandardPaths
 
 APP_NAME = "StagePro"
 CONFIG_FILE_NAME = "stagepro_config.json"
+
+def _app_base_dir() -> Path:
+    """
+    Returns the directory that should be treated as the 'portable root'.
+
+    Priority:
+    1) If running as an AppImage, use the directory containing the AppImage.
+       (APPIMAGE env var is set by AppImage runtime.)
+    2) If frozen (PyInstaller), use the directory containing the executable.
+    3) Otherwise (dev mode), use the project root (directory containing stagepro.py).
+    """
+    appimage_path = os.environ.get("APPIMAGE")
+    if appimage_path:
+        return Path(appimage_path).resolve().parent
+
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+
+    # dev mode: stagepro.py is in repo root; config.py is in stagepro/
+    return Path(__file__).resolve().parents[1]
+
+def resolve_songs_path(config_songs_path: str | None = None) -> str:
+    """
+    Resolve songs path with portable preference.
+
+    Order:
+    1) If config explicitly sets songs_path, use that (relative paths resolve from portable root).
+    2) If ./songs exists next to the AppImage/exe, use it (portable mode).
+    3) Else use per-user data dir and create it.
+    """
+    base = _app_base_dir()
+
+    # 1) Config override
+    if config_songs_path:
+        p = Path(config_songs_path).expanduser()
+        if not p.is_absolute():
+            p = (base / p).resolve()
+        p.mkdir(parents=True, exist_ok=True)
+        return str(p)
+
+    # 2) Portable folder next to app
+    portable = base / "songs"
+    if portable.exists() and portable.is_dir():
+        return str(portable)
+
+    # 3) Per-user fallback
+    user_root = Path(QStandardPaths.writableLocation(QStandardPaths.AppDataLocation))
+    fallback = user_root / "songs"
+    fallback.mkdir(parents=True, exist_ok=True)
+    return str(fallback)
 
 def get_user_config_dir() -> Path:
     home = Path.home()

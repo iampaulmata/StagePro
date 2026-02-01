@@ -7,6 +7,7 @@ __pycache__/
 
 # Virtual environments
 .venv/
+.venv-build/
 venv/
 env/
 ENV/
@@ -75,3 +76,31 @@ themes/_scratch/
 # =========================
 *.tmp
 *.temp
+
+# =========================
+# Build artifacts
+# =========================
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# AppImage / Linux packaging
+*.AppImage
+appimage/
+.AppDir/
+.AppDir/**
+
+# Windows / macOS artifacts (in case you build cross-platform)
+*.exe
+*.msi
+*.dmg
+*.pkg
+
+# Nuitka (if you try it later)
+nuitka-build/
+*.bin
+
+# Python bytecode cache in unusual places
+*.pyo

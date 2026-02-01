@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QGraphicsView,
 )
 
-from .config import load_or_create_config
+from .config import load_or_create_config, resolve_songs_path
 from .playlist import order_songs
 from .chordpro import Song, parse_chordpro
 from .render import song_to_chunks
@@ -57,10 +57,15 @@ class StageProWindow(QMainWindow):
         self.base_dir = base_dir
 
         self.config_path, self.cfg = load_or_create_config(base_dir)
-        self.songs_dir = (base_dir / SONGS_DIR_NAME)
-        self.songs_dir.mkdir(exist_ok=True)
+
+        # Ensure songs_path is resolved (portable-aware) even if cfg came from older file
+        self.cfg["songs_path"] = resolve_songs_path(self.cfg.get("songs_path"))
+
+        self.songs_dir = Path(self.cfg["songs_path"])
+        self.songs_dir.mkdir(parents=True, exist_ok=True)
 
         self.song_files = order_songs(self.songs_dir, self.cfg)
+
         self.song_idx = 0
 
         self.viewer = QTextBrowser()

@@ -1,35 +1,34 @@
-cat > packaging/stagepro.spec <<'EOF'
 # -*- mode: python ; coding: utf-8 -*-
 
-from PyInstaller.utils.hooks import collect_submodules, collect_data_files
+from pathlib import Path
 
 block_cipher = None
 
-hiddenimports = []
-hiddenimports += collect_submodules("PySide6")
+# IMPORTANT: run pyinstaller from the repo root so Path.cwd() is StagePro root
+ROOT = Path.cwd().resolve()
 
-datas = []
-# Include your project-shipped data files (adjust paths if your themes live elsewhere)
-# If your themes directory is inside stagepro/ or assets/, add it here.
-# Example: datas += [("stagepro/themes", "stagepro/themes")]
-datas += [("stagepro_config.example.json", ".")]
-datas += [("README.md", ".")]
-datas += [("LICENSE", ".")]
-datas += [("CONTRIBUTORS", ".")]
+entry_script = str(ROOT / "stagepro.py")
+
+datas = [
+    (str(ROOT / "themes"), "themes"),
+    (str(ROOT / "stagepro_config.example.json"), "."),
+    (str(ROOT / "README.md"), "."),
+    (str(ROOT / "LICENSE.md"), "."),
+    (str(ROOT / "CONTRIBUTORS.md"), "."),
+]
 
 a = Analysis(
-    ["stagepro.py"],
-    pathex=["."],
+    [entry_script],
+    pathex=[str(ROOT)],
     binaries=[],
     datas=datas,
-    hiddenimports=hiddenimports,
+    hiddenimports=[],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
-    cipher=block_cipher,
+    excludes=[
+        "PySide6.scripts.deploy_lib",
+    ],
     noarchive=False,
 )
 
@@ -47,7 +46,5 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
-    console=False,   # no console window
+    console=False,
 )
-
-EOF
