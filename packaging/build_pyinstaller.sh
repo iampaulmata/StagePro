@@ -17,12 +17,14 @@ pip install -r requirements-build.txt
 
 rm -rf "$ROOT/build" "$ROOT/dist"
 
-if grep -qE '^\s*COLLECT\s*\(' "$SPEC"; then
+if grep -qE '\bCOLLECT\s*\(' "$SPEC"; then
   echo "OK: Spec contains COLLECT() (onedir packaging expected)."
 else
   echo "ERROR: $SPEC does not contain COLLECT()."
+  echo "NOTE: Spec must include COLLECT(...) for onedir AppImage packaging."
   exit 1
 fi
+
 
 pyinstaller --clean --noconfirm "$SPEC"
 
