@@ -1,12 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
-
 from pathlib import Path
-
 block_cipher = None
 
-# IMPORTANT: run pyinstaller from the repo root so Path.cwd() is StagePro root
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(SPECPATH).resolve().parent.parent
 entry_script = str(ROOT / "stagepro.py")
+
 datas = [
     (str(ROOT / "themes"), "themes"),
     (str(ROOT / "assets"), "assets"),
