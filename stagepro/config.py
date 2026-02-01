@@ -134,4 +134,5 @@ def load_or_create_config(base_dir: Path) -> Tuple[Path, dict]:
     except Exception:
         user_path.parent.mkdir(parents=True, exist_ok=True)
         user_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+        cfg["songs_path"] = resolve_songs_path(cfg.get("songs_path"))
         return user_path, cfg
