@@ -84,7 +84,8 @@ for pat in "${prune_patterns[@]}"; do
 done
 
 # ---------- whitelist PySide6 Qt runtime ----------
-PY_PYSIDE_DIR="$(python3 -c 'import PySide6, pathlib; print(pathlib.Path(PySide6.__file__).resolve().parent)')"
+PYTHON="$ROOT/.venv-build/bin/python"
+PY_PYSIDE_DIR="$("$PYTHON" -c 'import PySide6, pathlib; print(pathlib.Path(PySide6.__file__).resolve().parent)')"
 QT_LIB_DIR="$PY_PYSIDE_DIR/Qt/lib"
 QT_PLUGINS_DIR="$PY_PYSIDE_DIR/Qt/plugins"
 
