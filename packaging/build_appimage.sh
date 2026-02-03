@@ -151,7 +151,13 @@ env -u LD_LIBRARY_PATH -u QT_PLUGIN_PATH -u QML2_IMPORT_PATH -u QT_QPA_PLATFORM_
 # ---------- normalize output name ----------
 OUT="$(ls -1 ./*.AppImage | head -n 1)"
 FINAL="StagePro-${VERSION}-x86_64.AppImage"
-mv -f "$OUT" "$FINAL"
+
+if [ "$(realpath "$OUT")" != "$(realpath "./$FINAL")" ]; then
+  mv -f "$OUT" "$FINAL"
+else
+  echo "AppImage already named correctly: $FINAL"
+fi
+
 sha256sum "$FINAL" > "${FINAL}.sha256"
 
 echo "Done: $FINAL"
