@@ -51,8 +51,10 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
     pyz,
     a.scripts,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
     [],
-    exclude_binaries=True,
     name="StagePro",
     debug=False,
     bootloader_ignore_signals=False,
@@ -65,14 +67,4 @@ app = BUNDLE(
     exe,
     name="StagePro.app",
     icon=None,
-)
-
-coll = COLLECT(
-    app,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    strip=False,
-    upx=False,
-    name="StagePro",
 )
