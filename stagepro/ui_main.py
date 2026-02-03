@@ -25,10 +25,14 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QGraphicsScene,
     QGraphicsView,
+    QComboBox,
+    QInputDialog,
+    QLineEdit,
 )
 
 from .config import load_or_create_config, resolve_songs_path
-from .playlist import order_songs
+from .playlist import order_songs, list_song_files_alpha
+from .playlists_store import PlaylistStore
 from .chordpro import Song, parse_chordpro
 from .chordpro_edit import upsert_directives
 from .importers import (
@@ -83,7 +87,12 @@ class StageProWindow(QMainWindow):
         self.songs_dir = Path(self.cfg["songs_path"])
         self.songs_dir.mkdir(parents=True, exist_ok=True)
 
-        self.song_files = order_songs(self.songs_dir, self.cfg)
+        # Playlists (multi-setlist)
+        self.playlists = PlaylistStore(self.songs_dir, self.cfg)
+        self.playlists.load_or_init()
+
+        self.song_files = []  # will be built from active playlist
+        self._refresh_song_list()
 
         self.song_idx = 0
 
@@ -106,9 +115,31 @@ class StageProWindow(QMainWindow):
         self.view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.view.setAlignment(Qt.AlignCenter)
 
-        # Maintenance UI (list + actions)
+        # Maintenance UI (playlist + library + actions)
         self.maint_root = QWidget(self)
-        self.maint_song_list = QListWidget(self.maint_root)
+
+        # Left column: search + playlist + library
+        self.maint_left = QWidget(self.maint_root)
+        self.maint_left_layout = QVBoxLayout(self.maint_left)
+        self.maint_left_layout.setContentsMargins(0, 0, 0, 0)
+        self.maint_left_layout.setSpacing(6)
+
+        self.search_box = QLineEdit(self.maint_left)
+        self.search_box.setPlaceholderText("Search library")
+
+        self.lbl_playlist = QLabel("Playlist", self.maint_left)
+        self.maint_playlist_list = QListWidget(self.maint_left)
+
+        self.lbl_library = QLabel("Library", self.maint_left)
+        self.maint_library_list = QListWidget(self.maint_left)
+
+        self.maint_left_layout.addWidget(self.search_box)
+        self.maint_left_layout.addWidget(self.lbl_playlist)
+        self.maint_left_layout.addWidget(self.maint_playlist_list, 1)
+        self.maint_left_layout.addWidget(self.lbl_library)
+        self.maint_left_layout.addWidget(self.maint_library_list, 1)
+
+        # Right column: preview
         self.maint_preview = QTextBrowser(self.maint_root)
         self.maint_preview.setOpenExternalLinks(False)
         self.maint_preview.setStyleSheet("QTextBrowser { border: 1px solid #333; }")
@@ -120,6 +151,13 @@ class StageProWindow(QMainWindow):
         self.btn_mb_autofill = QPushButton("Autofill from MusicBrainz…")
         self.maint_status = QLabel("")
         self.maint_status.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.cmb_playlist = QComboBox()
+        self.btn_pl_new = QPushButton("New")
+        self.btn_pl_rename = QPushButton("Rename")
+        self.btn_pl_dup = QPushButton("Duplicate")
+        self.btn_pl_del = QPushButton("Delete")
+        self.btn_add_to_set = QPushButton("Add →")
+        self.btn_remove_from_set = QPushButton("Remove")
 
         self._build_maintenance_ui()
 
@@ -281,61 +319,156 @@ class StageProWindow(QMainWindow):
         top_row.addSpacing(6)
         top_row.addWidget(self.btn_mb_autofill)
         top_row.addStretch(1)
-        top_row.addWidget(QLabel("Setlist:"))
+        top_row.addWidget(QLabel("Playlist:"))
+        top_row.addWidget(self.cmb_playlist)
+        top_row.addWidget(self.btn_pl_new)
+        top_row.addWidget(self.btn_pl_rename)
+        top_row.addWidget(self.btn_pl_dup)
+        top_row.addWidget(self.btn_pl_del)
+
+        top_row.addSpacing(12)
+        top_row.addWidget(QLabel("Order:"))
         top_row.addWidget(self.btn_move_up)
         top_row.addWidget(self.btn_move_down)
-        top_row.addWidget(self.btn_save_setlist)
+        top_row.addWidget(self.btn_add_to_set)
+        top_row.addWidget(self.btn_remove_from_set)
+
+        top_row.addSpacing(12)
+        top_row.addWidget(self.btn_save_setlist)  # keep as export-to-setlist.txt for now
+
         outer.addLayout(top_row)
 
         split = QSplitter(Qt.Horizontal)
-        split.addWidget(self.maint_song_list)
+        split.addWidget(self.maint_left)
         split.addWidget(self.maint_preview)
         split.setStretchFactor(0, 0)
         split.setStretchFactor(1, 1)
         outer.addWidget(split, 1)
         outer.addWidget(self.maint_status)
 
-        self.maint_song_list.itemSelectionChanged.connect(self._on_maint_selection_changed)
+        self.maint_playlist_list.itemSelectionChanged.connect(self._on_maint_selection_changed)
+        self.maint_library_list.itemSelectionChanged.connect(self._on_maint_selection_changed)
+        self.maint_library_list.itemDoubleClicked.connect(lambda _: self._add_selected_library_to_playlist())
+        self.search_box.textChanged.connect(lambda _: self._refresh_maintenance_list(preserve_selection=True))
         self.btn_import.clicked.connect(self._on_import_clicked)
         self.btn_save_setlist.clicked.connect(self._save_setlist_from_ui)
         self.btn_move_up.clicked.connect(lambda: self._move_selected_item(-1))
         self.btn_move_down.clicked.connect(lambda: self._move_selected_item(+1))
+        self.btn_add_to_set.clicked.connect(self._add_selected_library_to_playlist)
         self.btn_mb_autofill.clicked.connect(self._on_mb_autofill_clicked)
+        self.cmb_playlist.currentIndexChanged.connect(self._on_playlist_changed)
+        self.btn_pl_new.clicked.connect(self._pl_new)
+        self.btn_pl_rename.clicked.connect(self._pl_rename)
+        self.btn_pl_dup.clicked.connect(self._pl_duplicate)
+        self.btn_pl_del.clicked.connect(self._pl_delete)
+
+        self.btn_remove_from_set.clicked.connect(self._remove_selected_from_playlist)
 
         # Tooltips for clarity
         self.btn_mb_autofill.setToolTip("Search MusicBrainz to fill missing metadata for the selected song")
-        self.btn_save_setlist.setToolTip("Write the setlist order to setlist.txt in your songs folder")
+        self.btn_add_to_set.setToolTip("Add selected Library song to the current playlist (does not copy files)")
+        self.btn_remove_from_set.setToolTip("Remove selected song from the current playlist (does not delete the file)")
+        self.btn_save_setlist.setToolTip("Export current playlist order to setlist.txt (legacy compatibility)")
+
+    def _refresh_playlist_selector(self) -> None:
+        self.cmb_playlist.blockSignals(True)
+        self.cmb_playlist.clear()
+
+        active_id = self.playlists.active_playlist_id
+        active_index = 0
+        for i, pl in enumerate(self.playlists.list_playlists()):
+            self.cmb_playlist.addItem(pl.name, pl.playlist_id)
+            if pl.playlist_id == active_id:
+                active_index = i
+
+        self.cmb_playlist.setCurrentIndex(active_index)
+        self.cmb_playlist.blockSignals(False)
 
     def _refresh_maintenance_list(self, preserve_selection: bool = False) -> None:
-        prev = None
+        """Refresh Maintenance Mode playlist + library lists."""
+        self._refresh_playlist_selector()
+
+        # Preserve selection paths if requested
+        prev_pl = None
+        prev_lib = None
         if preserve_selection:
-            items = self.maint_song_list.selectedItems()
-            if items:
-                prev = items[0].data(Qt.UserRole)
+            pl_items = self.maint_playlist_list.selectedItems()
+            lib_items = self.maint_library_list.selectedItems()
+            if pl_items:
+                prev_pl = pl_items[0].data(Qt.UserRole)
+            if lib_items:
+                prev_lib = lib_items[0].data(Qt.UserRole)
 
-        self._refresh_song_list()
-        self.maint_song_list.clear()
-        for p in self.song_files:
-            it = QListWidgetItem(p.name)
+        pl = self.playlists.get_active()
+        playlist_names = list(pl.items)
+
+        # Library: all files in songs_dir (alpha)
+        lib_paths = list_song_files_alpha(self.songs_dir, self.cfg)
+        lib_names = [p.name for p in lib_paths]
+
+        # Search filters the library only (keeps playlist operations predictable)
+        q = (self.search_box.text() or "").strip().lower()
+        if q:
+            lib_names = [n for n in lib_names if q in n.lower()]
+
+        # Populate playlist list (playlist-only)
+        self.maint_playlist_list.clear()
+        for name in playlist_names:
+            p = self.songs_dir / name
+            it = QListWidgetItem(name)
             it.setData(Qt.UserRole, str(p))
-            self.maint_song_list.addItem(it)
+            self.maint_playlist_list.addItem(it)
 
-        # restore selection
-        if prev:
-            for i in range(self.maint_song_list.count()):
-                if self.maint_song_list.item(i).data(Qt.UserRole) == prev:
-                    self.maint_song_list.setCurrentRow(i)
-                    break
-        elif self.maint_song_list.count() > 0:
-            self.maint_song_list.setCurrentRow(max(0, min(self.song_idx, self.maint_song_list.count() - 1)))
+        # Populate library list; disable items already in playlist
+        playlist_set = {n.lower() for n in playlist_names}
+        self.maint_library_list.clear()
+        for name in lib_names:
+            p = self.songs_dir / name
+            it = QListWidgetItem(name)
+            it.setData(Qt.UserRole, str(p))
+            if name.lower() in playlist_set:
+                it.setFlags(it.flags() & ~Qt.ItemIsEnabled)
+            self.maint_library_list.addItem(it)
+
+        # Restore selection
+        def _restore(lst: QListWidget, target):
+            if not target:
+                return False
+            for i in range(lst.count()):
+                if lst.item(i).data(Qt.UserRole) == target:
+                    lst.setCurrentRow(i)
+                    return True
+            return False
+
+        restored = _restore(self.maint_playlist_list, prev_pl) if prev_pl else False
+        if not restored and prev_lib:
+            _restore(self.maint_library_list, prev_lib)
+
+        # Default selection for preview: playlist selection if available, else library
+        if self.maint_playlist_list.count() > 0 and self.maint_playlist_list.currentRow() < 0:
+            self.maint_playlist_list.setCurrentRow(0)
+        elif self.maint_library_list.count() > 0 and self.maint_library_list.currentRow() < 0:
+            self.maint_library_list.setCurrentRow(0)
+
+        # Rebuild runtime play order for on-stage mode
+        self._refresh_song_list()
 
     def _on_maint_selection_changed(self) -> None:
-        items = self.maint_song_list.selectedItems()
-        if not items:
+        path = self._selected_path_for_preview()
+        if not path:
             self.maint_preview.setPlainText("")
             return
-        path = Path(items[0].data(Qt.UserRole))
         self._preview_song_in_maintenance(path)
+
+    def _selected_path_for_preview(self) -> Optional[Path]:
+        """Return selected song Path from either playlist or library list."""
+        pl_items = self.maint_playlist_list.selectedItems()
+        if pl_items:
+            return Path(pl_items[0].data(Qt.UserRole))
+        lib_items = self.maint_library_list.selectedItems()
+        if lib_items:
+            return Path(lib_items[0].data(Qt.UserRole))
+        return None
 
     def _preview_song_in_maintenance(self, path: Path) -> None:
         try:
@@ -366,21 +499,103 @@ class StageProWindow(QMainWindow):
             self.maint_status.setText(f"Selected: {path.name} (parse error: {e})")
 
     def _move_selected_item(self, delta: int) -> None:
-        row = self.maint_song_list.currentRow()
+        row = self.maint_playlist_list.currentRow()
         if row < 0:
             return
         new_row = row + int(delta)
-        if new_row < 0 or new_row >= self.maint_song_list.count():
+        if new_row < 0 or new_row >= self.maint_playlist_list.count():
             return
-        it = self.maint_song_list.takeItem(row)
-        self.maint_song_list.insertItem(new_row, it)
-        self.maint_song_list.setCurrentRow(new_row)
+        it = self.maint_playlist_list.takeItem(row)
+        self.maint_playlist_list.insertItem(new_row, it)
+        self.maint_playlist_list.setCurrentRow(new_row)
+        self._persist_current_playlist_order()
+
+    def _persist_current_playlist_order(self) -> None:
+        pid = self.playlists.active_playlist_id
+        if not pid:
+            return
+        items = []
+        for i in range(self.maint_playlist_list.count()):
+            it = self.maint_playlist_list.item(i)
+            items.append(Path(it.data(Qt.UserRole)).name)
+        self.playlists.set_items(pid, items)
+
+    def _add_selected_library_to_playlist(self) -> None:
+        item = self.maint_library_list.currentItem()
+        if not item:
+            return
+        filename = Path(item.data(Qt.UserRole)).name
+        self._add_filename_to_active_playlist(filename)
+        self._refresh_maintenance_list(preserve_selection=False)
+
+    def _add_filename_to_active_playlist(self, filename: str) -> None:
+        pl = self.playlists.get_active()
+        items = list(pl.items)
+        if filename.lower() in {x.lower() for x in items}:
+            return
+        items.append(filename)
+        self.playlists.set_items(pl.playlist_id, items)
+
+    def _remove_selected_from_playlist(self) -> None:
+        pid = self.playlists.active_playlist_id
+        if not pid:
+            return
+        row = self.maint_playlist_list.currentRow()
+        if row < 0:
+            return
+
+        self.playlists.remove_items_by_index(pid, [row])
+        self._refresh_maintenance_list(preserve_selection=False)
+        self._load_first_song_or_welcome()
+
+    def _on_playlist_changed(self, idx: int) -> None:
+        pid = self.cmb_playlist.currentData()
+        if not pid:
+            return
+        self.playlists.set_active(pid)
+        self._refresh_maintenance_list(preserve_selection=False)
+        self._load_first_song_or_welcome()
+
+    def _pl_new(self) -> None:
+        name, ok = QInputDialog.getText(self, "New Playlist", "Playlist name:")
+        if not ok:
+            return
+        self.playlists.create_playlist(name=name.strip() or "New Playlist", items=[])
+        self._refresh_maintenance_list(preserve_selection=False)
+
+    def _pl_rename(self) -> None:
+        pl = self.playlists.get_active()
+        name, ok = QInputDialog.getText(self, "Rename Playlist", "New name:", text=pl.name)
+        if not ok:
+            return
+        self.playlists.rename_playlist(pl.playlist_id, name.strip() or pl.name)
+        self._refresh_maintenance_list(preserve_selection=True)
+
+    def _pl_duplicate(self) -> None:
+        pl = self.playlists.get_active()
+        self.playlists.duplicate_playlist(pl.playlist_id)
+        self._refresh_maintenance_list(preserve_selection=False)
+
+    def _pl_delete(self) -> None:
+        pl = self.playlists.get_active()
+        resp = QMessageBox.question(
+            self,
+            "Delete Playlist",
+            f"Delete playlist '{pl.name}'?\n\nThis will NOT delete any song files.",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        if resp != QMessageBox.Yes:
+            return
+        self.playlists.delete_playlist(pl.playlist_id)
+        self._refresh_maintenance_list(preserve_selection=False)
+        self._load_first_song_or_welcome()
+
 
     def _save_setlist_from_ui(self) -> None:
         setlist_name = (self.cfg.get("setlist", {}) or {}).get("filename", "setlist.txt")
         lines = []
-        for i in range(self.maint_song_list.count()):
-            it = self.maint_song_list.item(i)
+        for i in range(self.maint_playlist_list.count()):
+            it = self.maint_playlist_list.item(i)
             # store filenames (not absolute paths)
             lines.append(Path(it.data(Qt.UserRole)).name)
         p = self.songs_dir / setlist_name
@@ -402,7 +617,20 @@ class StageProWindow(QMainWindow):
         warnings: List[str] = []
         for fp in files:
             src = Path(fp)
+
+            # If the selected file is already in the songs folder, do NOT import/copy it.
+            # Just add it to the active playlist.
             try:
+                if src.resolve().parent == self.songs_dir.resolve():
+                    if src.exists() and src.is_file():
+                        self._add_filename_to_active_playlist(src.name)
+                        imported += 1
+                        continue
+            except Exception:
+                pass
+
+            try:
+
                 imp = import_user_file_to_chordpro(src)
                 # choose dest
                 title = imp.title or src.stem
@@ -410,6 +638,9 @@ class StageProWindow(QMainWindow):
                 dest = choose_destination_path(self.songs_dir, title, artist, ext=".pro")
                 dest.write_text(imp.chordpro_text, encoding="utf-8")
                 imported += 1
+                # add to active playlist (at end)
+                self._add_filename_to_active_playlist(dest.name)
+
                 if not imp.title or not imp.artist:
                     warnings.append(f"{src.name}: imported, but title/artist missing in directives (you can autofill from MusicBrainz)")
             except ImportErrorWithHint as e:
@@ -426,11 +657,10 @@ class StageProWindow(QMainWindow):
         QMessageBox.information(self, "Import", msg)
 
     def _on_mb_autofill_clicked(self) -> None:
-        items = self.maint_song_list.selectedItems()
-        if not items:
+        path = self._selected_path_for_preview()
+        if not path:
             QMessageBox.information(self, "MusicBrainz", "Select a song first.")
             return
-        path = Path(items[0].data(Qt.UserRole))
         try:
             text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
@@ -592,6 +822,21 @@ class StageProWindow(QMainWindow):
     def eventFilter(self, obj, event):
         if event.type() == QEvent.KeyPress and not event.isAutoRepeat():
             k = event.key()
+
+            # Maintenance: remove from playlist
+            if self.mode == "maintenance" and k in (Qt.Key_Delete, Qt.Key_Backspace):
+                self._remove_selected_from_playlist()
+                return True
+
+            # Maintenance: reorder shortcuts
+            if self.mode == "maintenance" and (event.modifiers() & Qt.ControlModifier):
+                if k == Qt.Key_Up:
+                    self._move_selected_item(-1)
+                    return True
+                if k == Qt.Key_Down:
+                    self._move_selected_item(+1)
+                    return True
+
             # Ctrl+F toggles maintenance <-> on-stage
             if k == Qt.Key_F and (event.modifiers() & Qt.ControlModifier):
                 self._toggle_mode()
@@ -614,7 +859,8 @@ class StageProWindow(QMainWindow):
                 if self.mode == "onstage":
                     self.next_page()
                 else:
-                    self.maint_song_list.setCurrentRow(min(self.maint_song_list.count() - 1, self.maint_song_list.currentRow() + 1))
+                    lst = self.maint_library_list if self.maint_library_list.hasFocus() else self.maint_playlist_list
+                    lst.setCurrentRow(min(lst.count() - 1, lst.currentRow() + 1))
                 return True
 
             if k in (Qt.Key_PageUp, Qt.Key_Left):
@@ -626,7 +872,8 @@ class StageProWindow(QMainWindow):
                 if self.mode == "onstage":
                     self.prev_page()
                 else:
-                    self.maint_song_list.setCurrentRow(max(0, self.maint_song_list.currentRow() - 1))
+                    lst = self.maint_library_list if self.maint_library_list.hasFocus() else self.maint_playlist_list
+                    lst.setCurrentRow(max(0, lst.currentRow() - 1))
                 return True
 
         if event.type() == QEvent.KeyRelease and not event.isAutoRepeat():
@@ -675,8 +922,21 @@ class StageProWindow(QMainWindow):
         )
 
 
-    def _refresh_song_list(self):
-        self.song_files = order_songs(self.songs_dir, self.cfg)
+    def _refresh_song_list(self) -> None:
+        """Rebuild self.song_files from the ACTIVE playlist only (playlist == setlist)."""
+        pl = self.playlists.get_active()
+        items = list(pl.items or [])
+
+        # Map filenames -> actual Paths (skip missing)
+        existing = {p.name.lower(): p for p in list_song_files_alpha(self.songs_dir, self.cfg)}
+
+        ordered = []
+        for name in items:
+            p = existing.get(str(name).lower())
+            if p:
+                ordered.append(p)
+
+        self.song_files = ordered
 
     def _load_first_song_or_welcome(self):
         self._refresh_song_list()
