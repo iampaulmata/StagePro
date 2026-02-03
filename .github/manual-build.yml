@@ -120,7 +120,6 @@ jobs:
         shell: pwsh
         run: |
           Remove-Item -Recurse -Force build, dist -ErrorAction SilentlyContinue
-          cd "$env:GITHUB_WORKSPACE"
           pyinstaller stagepro.windows.spec --clean
 
       - name: Package portable zip (Windows)
