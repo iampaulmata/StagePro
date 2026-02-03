@@ -28,16 +28,22 @@ jobs:
           command -v python3.12
           python3.12 --version
 
-      - name: Install deps
+      - name: Create venv + install deps
+        shell: bash
         run: |
-          python3.12 -m pip install --upgrade pip
-          python3.12 -m pip install -r requirements.txt
-          python3.12 -m pip install -r requirements-build.txt
+          PY312="$(command -v python3.12)"
+          echo "Using: $PY312"
+          "$PY312" -m venv .venv
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install -r requirements-build.txt
 
       - name: Build (PyInstaller)
         run: |
+          source .venv/bin/activate
           rm -rf build dist
-          python3.12 -m PyInstaller packaging/stagepro.macos.spec --clean
+          python -m PyInstaller packaging/stagepro.macos.spec --clean
 
       - name: Zip .app
         run: |
