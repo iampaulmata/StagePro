@@ -2,21 +2,15 @@ name: macOS App (unsigned)
 
 on:
   push:
-    tags: [ "v*" ]
-  workflow_dispatch:
-    inputs:
-      release_upload:
-        description: "Upload artifact to a GitHub Release (only if this run is on a v* tag)"
-        type: boolean
-        default: false
+    tags: ["v*"]
+  workflow_dispatch: {}
 
-# Default: least privilege
+# Default least-privilege for the whole workflow
 permissions:
   contents: read
 
 jobs:
   build-macos:
-    # Use your self-hosted runner labels (match what you configured in ./config.sh)
     runs-on: [self-hosted, macos, monterey, stagepro-builder]
 
     steps:
@@ -29,8 +23,6 @@ jobs:
           pwd
           ls -la
 
-      # Prefer using the Python you installed once on the machine.
-      # If you want, hardcode python3.12 from brew: /opt/homebrew/bin/python3.12 (Apple Silicon)
       - name: Verify Python
         run: |
           command -v python3.12
@@ -58,19 +50,30 @@ jobs:
           name: StagePro-macos
           path: StagePro-*-macos.zip
 
-      # Only allow release upload on version tags AND if explicitly requested (manual) OR tag push.
-      # On tag push: it will upload automatically.
-      - name: Upload to Release (tags)
-        if: startsWith(github.ref, 'refs/tags/v')
-        permissions:
-          contents: write
-        uses: softprops/action-gh-release@v2
-        with:
-          files: StagePro-*-macos.zip
-
-      # Always cleanup workspace on self-hosted
       - name: Cleanup workspace
         if: always()
         run: |
           echo "Cleaning workspace..."
           git clean -fdx || true
+
+  release-macos:
+    # Only run when this workflow is triggered by a version tag
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build-macos
+
+    # This job needs write permission to create/update the GitHub Release assets
+    permissions:
+      contents: write
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: StagePro-macos
+          path: .
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: StagePro-*-macos.zip
