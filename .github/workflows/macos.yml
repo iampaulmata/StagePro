@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build-macos:
-    runs-on: [self-hosted, macos, monterey, stagepro-builder]
+    runs-on: [self-hosted, macos, X64, monterey, stagepro-builder]
 
     steps:
       - uses: actions/checkout@v4
