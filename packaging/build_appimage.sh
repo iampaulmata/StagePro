@@ -115,6 +115,16 @@ for lib in "${QT_LIBS[@]}"; do
   fi
 done
 
+# ICU libs (avoid system ICU version mismatch like libicui18n.so.73)
+for icu in libicui18n.so libicuuc.so libicudata.so; do
+  if compgen -G "$QT_LIB_DIR/$icu*" > /dev/null; then
+    cp -av "$QT_LIB_DIR/$icu"* "$APPDIR/usr/lib/"
+  else
+    echo "WARN: ICU lib not found in wheel: $QT_LIB_DIR/$icu*"
+  fi
+done
+
+
 QT_PLUGIN_DIRS=( "platforms" "imageformats" "styles" "xcbglintegrations" )
 for d in "${QT_PLUGIN_DIRS[@]}"; do
   if [ -d "$QT_PLUGINS_DIR/$d" ]; then
