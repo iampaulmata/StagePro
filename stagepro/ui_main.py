@@ -1,14 +1,28 @@
 from pathlib import Path
 import copy
-from typing import List, Optional
+import json
+import re
+from typing import List, Optional, Tuple
 
 from PySide6.QtCore import Qt, QEvent, QTimer, QRectF, QSize
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
     QMessageBox,
     QTextBrowser,
+    QWidget,
+    QStackedWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QSplitter,
+    QListWidget,
+    QListWidgetItem,
+    QPushButton,
+    QFileDialog,
+    QLabel,
+    QDialog,
+    QDialogButtonBox,
     QGraphicsScene,
     QGraphicsView,
 )
@@ -16,12 +30,17 @@ from PySide6.QtWidgets import (
 from .config import load_or_create_config, resolve_songs_path
 from .playlist import order_songs
 from .chordpro import Song, parse_chordpro
+from .chordpro_edit import upsert_directives
+from .importers import (
+    ImportErrorWithHint,
+    import_user_file_to_chordpro,
+    choose_destination_path,
+)
+from .musicbrainz import MusicBrainzClient, MBRecordingHit
+from .config import get_user_config_dir
 from .render import song_to_chunks
 from .paginate import paginate_to_fit
 SONGS_DIR_NAME = "songs"
-
-from pathlib import Path
-import json
 
 def _load_theme_colors(base_dir: str, cfg: dict) -> dict:
     """
@@ -68,6 +87,12 @@ class StageProWindow(QMainWindow):
 
         self.song_idx = 0
 
+        # ---------------- Modes ----------------
+        # Maintenance mode is the "setup" experience (keyboard/mouse, import, setlist).
+        # On-stage mode is the fullscreen, footswitch-friendly prompter.
+        self.mode = "maintenance"  # or "onstage"
+
+        # On-stage viewer (existing rendering pipeline)
         self.viewer = QTextBrowser()
         self.viewer.setOpenExternalLinks(False)
         self.viewer.setStyleSheet("QTextBrowser { border: none; }")
@@ -81,14 +106,35 @@ class StageProWindow(QMainWindow):
         self.view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.view.setAlignment(Qt.AlignCenter)
 
-        self.setCentralWidget(self.view)
+        # Maintenance UI (list + actions)
+        self.maint_root = QWidget(self)
+        self.maint_song_list = QListWidget(self.maint_root)
+        self.maint_preview = QTextBrowser(self.maint_root)
+        self.maint_preview.setOpenExternalLinks(False)
+        self.maint_preview.setStyleSheet("QTextBrowser { border: 1px solid #333; }")
+
+        self.btn_import = QPushButton("Import Songs…")
+        self.btn_save_setlist = QPushButton("Save Setlist")
+        self.btn_move_up = QPushButton("▲")
+        self.btn_move_down = QPushButton("▼")
+        self.btn_mb_autofill = QPushButton("Autofill from MusicBrainz…")
+        self.maint_status = QLabel("")
+        self.maint_status.setTextInteractionFlags(Qt.TextSelectableByMouse)
+
+        self._build_maintenance_ui()
+
+        # Stack: maintenance vs on-stage
+        self.stack = QStackedWidget(self)
+        self.stack.addWidget(self.maint_root)  # index 0
+        self.stack.addWidget(self.view)        # index 1
+        self.setCentralWidget(self.stack)
 
         self.song: Optional[Song] = None
         self.pages: List[str] = []
         self.page_index = 0
         self.blackout = False
 
-        # Exit combo
+        # Exit combo (hold both pedal buttons)
         self.pressed_keys = set()
         self.exit_hold_ms = int((self.cfg.get("shortcuts", {}) or {}).get("exit_hold_ms", 1500))
         self.exit_timer = QTimer(self)
@@ -97,10 +143,20 @@ class StageProWindow(QMainWindow):
 
         QApplication.instance().installEventFilter(self)
 
+        # On-stage toggle combo: quick press of both footswitches.
+        self._combo_window_ms = int((self.cfg.get("shortcuts", {}) or {}).get("toggle_onstage_combo_ms", 180))
+        self._last_pedal_down: dict[int, int] = {}  # key -> ms timestamp
+        self._combo_latched = False
+
+        # MusicBrainz client (metadata-only)
+        cache_path = get_user_config_dir() / "musicbrainz_cache.json"
+        self.mb = MusicBrainzClient(cache_path=cache_path)
+
         self._build_actions()
         self.setWindowTitle("StagePro")
-        self.showFullScreen()
         self._load_first_song_or_welcome()
+        self._refresh_maintenance_list()
+        self._set_mode("maintenance")
 
     # ---------- Config helpers ----------
 
@@ -188,6 +244,297 @@ class StageProWindow(QMainWindow):
         self._apply_orientation_transform()
         self._repaginate_and_render()
 
+    # ---------- Mode management ----------
+
+    def _set_mode(self, mode: str) -> None:
+        mode = (mode or "").strip().lower()
+        if mode not in {"maintenance", "onstage"}:
+            mode = "maintenance"
+        self.mode = mode
+
+        if self.mode == "onstage":
+            self.stack.setCurrentIndex(1)
+            self.menuBar().setVisible(False)
+            self.showFullScreen()
+            self._apply_orientation_transform()
+            self._repaginate_and_render()
+        else:
+            self.stack.setCurrentIndex(0)
+            self.menuBar().setVisible(True)
+            self.showMaximized()
+            self._refresh_maintenance_list(preserve_selection=True)
+
+    def _toggle_mode(self) -> None:
+        self._set_mode("onstage" if self.mode != "onstage" else "maintenance")
+
+    # ---------- Maintenance UI ----------
+
+    def _build_maintenance_ui(self) -> None:
+        """Builds the maintenance-mode UI (library + setlist + import tools)."""
+        root = self.maint_root
+        outer = QVBoxLayout(root)
+        outer.setContentsMargins(8, 8, 8, 8)
+        outer.setSpacing(6)
+
+        top_row = QHBoxLayout()
+        top_row.addWidget(self.btn_import)
+        top_row.addSpacing(6)
+        top_row.addWidget(self.btn_mb_autofill)
+        top_row.addStretch(1)
+        top_row.addWidget(QLabel("Setlist:"))
+        top_row.addWidget(self.btn_move_up)
+        top_row.addWidget(self.btn_move_down)
+        top_row.addWidget(self.btn_save_setlist)
+        outer.addLayout(top_row)
+
+        split = QSplitter(Qt.Horizontal)
+        split.addWidget(self.maint_song_list)
+        split.addWidget(self.maint_preview)
+        split.setStretchFactor(0, 0)
+        split.setStretchFactor(1, 1)
+        outer.addWidget(split, 1)
+        outer.addWidget(self.maint_status)
+
+        self.maint_song_list.itemSelectionChanged.connect(self._on_maint_selection_changed)
+        self.btn_import.clicked.connect(self._on_import_clicked)
+        self.btn_save_setlist.clicked.connect(self._save_setlist_from_ui)
+        self.btn_move_up.clicked.connect(lambda: self._move_selected_item(-1))
+        self.btn_move_down.clicked.connect(lambda: self._move_selected_item(+1))
+        self.btn_mb_autofill.clicked.connect(self._on_mb_autofill_clicked)
+
+        # Tooltips for clarity
+        self.btn_mb_autofill.setToolTip("Search MusicBrainz to fill missing metadata for the selected song")
+        self.btn_save_setlist.setToolTip("Write the setlist order to setlist.txt in your songs folder")
+
+    def _refresh_maintenance_list(self, preserve_selection: bool = False) -> None:
+        prev = None
+        if preserve_selection:
+            items = self.maint_song_list.selectedItems()
+            if items:
+                prev = items[0].data(Qt.UserRole)
+
+        self._refresh_song_list()
+        self.maint_song_list.clear()
+        for p in self.song_files:
+            it = QListWidgetItem(p.name)
+            it.setData(Qt.UserRole, str(p))
+            self.maint_song_list.addItem(it)
+
+        # restore selection
+        if prev:
+            for i in range(self.maint_song_list.count()):
+                if self.maint_song_list.item(i).data(Qt.UserRole) == prev:
+                    self.maint_song_list.setCurrentRow(i)
+                    break
+        elif self.maint_song_list.count() > 0:
+            self.maint_song_list.setCurrentRow(max(0, min(self.song_idx, self.maint_song_list.count() - 1)))
+
+    def _on_maint_selection_changed(self) -> None:
+        items = self.maint_song_list.selectedItems()
+        if not items:
+            self.maint_preview.setPlainText("")
+            return
+        path = Path(items[0].data(Qt.UserRole))
+        self._preview_song_in_maintenance(path)
+
+    def _preview_song_in_maintenance(self, path: Path) -> None:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            text = path.read_text(encoding="latin-1")
+
+        try:
+            song = parse_chordpro(text)
+            chunks = song_to_chunks(song)
+            # Use a lightweight preview size (avoid needing the onstage graphics view)
+            w = 900
+            h = 1200
+            eff_cfg = self._effective_cfg()
+            pages = paginate_to_fit(eff_cfg, song, path.name, chunks, w, h)
+            self.maint_preview.setHtml(pages[0] if pages else self._welcome_html())
+            missing = []
+            if not song.meta.get("title") and not song.meta.get("t"):
+                missing.append("title")
+            if not song.meta.get("artist") and not song.meta.get("a"):
+                missing.append("artist")
+            if missing:
+                self.maint_status.setText(f"Selected: {path.name} (missing: {', '.join(missing)})")
+            else:
+                self.maint_status.setText(f"Selected: {path.name}")
+        except Exception as e:
+            self.maint_preview.setPlainText(text)
+            self.maint_status.setText(f"Selected: {path.name} (parse error: {e})")
+
+    def _move_selected_item(self, delta: int) -> None:
+        row = self.maint_song_list.currentRow()
+        if row < 0:
+            return
+        new_row = row + int(delta)
+        if new_row < 0 or new_row >= self.maint_song_list.count():
+            return
+        it = self.maint_song_list.takeItem(row)
+        self.maint_song_list.insertItem(new_row, it)
+        self.maint_song_list.setCurrentRow(new_row)
+
+    def _save_setlist_from_ui(self) -> None:
+        setlist_name = (self.cfg.get("setlist", {}) or {}).get("filename", "setlist.txt")
+        lines = []
+        for i in range(self.maint_song_list.count()):
+            it = self.maint_song_list.item(i)
+            # store filenames (not absolute paths)
+            lines.append(Path(it.data(Qt.UserRole)).name)
+        p = self.songs_dir / setlist_name
+        p.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+        self.maint_status.setText(f"Saved setlist: {p}")
+        self._refresh_song_list()
+
+    def _on_import_clicked(self) -> None:
+        files, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Import songs",
+            str(self.songs_dir),
+            "Songs (*.pro *.cho *.chopro *.txt);;All files (*)",
+        )
+        if not files:
+            return
+
+        imported = 0
+        warnings: List[str] = []
+        for fp in files:
+            src = Path(fp)
+            try:
+                imp = import_user_file_to_chordpro(src)
+                # choose dest
+                title = imp.title or src.stem
+                artist = imp.artist or "Unknown"
+                dest = choose_destination_path(self.songs_dir, title, artist, ext=".pro")
+                dest.write_text(imp.chordpro_text, encoding="utf-8")
+                imported += 1
+                if not imp.title or not imp.artist:
+                    warnings.append(f"{src.name}: imported, but title/artist missing in directives (you can autofill from MusicBrainz)")
+            except ImportErrorWithHint as e:
+                warnings.append(f"{src.name}: {e}")
+            except Exception as e:
+                warnings.append(f"{src.name}: import failed ({e})")
+
+        self._refresh_maintenance_list(preserve_selection=False)
+        msg = f"Imported {imported} file(s)."
+        if warnings:
+            msg += "\n\n" + "\n".join(warnings[:12])
+            if len(warnings) > 12:
+                msg += f"\n…and {len(warnings) - 12} more."
+        QMessageBox.information(self, "Import", msg)
+
+    def _on_mb_autofill_clicked(self) -> None:
+        items = self.maint_song_list.selectedItems()
+        if not items:
+            QMessageBox.information(self, "MusicBrainz", "Select a song first.")
+            return
+        path = Path(items[0].data(Qt.UserRole))
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            text = path.read_text(encoding="latin-1")
+
+        # Extract title/artist from existing directives if present.
+        title = ""
+        artist = ""
+        for raw in text.splitlines():
+            m = re.match(r"^\s*\{\s*([^}:]+)\s*:\s*([^}]*)\}\s*$", raw, flags=re.IGNORECASE)
+            if not m:
+                continue
+            k = m.group(1).strip().lower()
+            v = m.group(2).strip()
+            if k in {"title", "t"} and not title:
+                title = v
+            if k in {"artist", "a"} and not artist:
+                artist = v
+
+        if not title or not artist:
+            QMessageBox.information(
+                self,
+                "MusicBrainz",
+                "This file is missing a title and/or artist directive.\n\n"
+                "StagePro can search MusicBrainz only when it knows the song title and artist.\n"
+                "Add {title: ...} and {artist: ...} (or re-import using the fallback header format).",
+            )
+            return
+
+        try:
+            hits = self.mb.search_recordings(title=title, artist=artist, limit=12)
+        except Exception as e:
+            QMessageBox.critical(self, "MusicBrainz", f"Search failed: {e}")
+            return
+
+        if not hits:
+            QMessageBox.information(self, "MusicBrainz", "No matches found.")
+            return
+
+        chosen = self._pick_musicbrainz_hit(hits)
+        if not chosen:
+            return
+
+        updates = {}
+        # Fill missing basics (do not overwrite user-specified values)
+        updates.setdefault("title", chosen.title)
+        updates.setdefault("artist", chosen.artist)
+        if chosen.release:
+            updates.setdefault("album", chosen.release)
+        if chosen.date:
+            updates.setdefault("year", chosen.date.split("-")[0])
+
+        # Only apply updates for keys that are currently missing
+        current_meta = {}
+        for raw in text.splitlines():
+            m = re.match(r"^\s*\{\s*([^}:]+)\s*:\s*([^}]*)\}\s*$", raw, flags=re.IGNORECASE)
+            if m:
+                current_meta[m.group(1).strip().lower()] = m.group(2).strip()
+
+        filtered_updates = {k: v for k, v in updates.items() if not current_meta.get(k)}
+        if not filtered_updates:
+            QMessageBox.information(self, "MusicBrainz", "Nothing to autofill — metadata is already present.")
+            return
+
+        new_text, _ = upsert_directives(text, filtered_updates)
+        try:
+            path.write_text(new_text, encoding="utf-8")
+        except Exception as e:
+            QMessageBox.critical(self, "MusicBrainz", f"Failed to save updates: {e}")
+            return
+
+        self.maint_status.setText(f"Autofilled metadata from MusicBrainz for: {path.name}")
+        self._preview_song_in_maintenance(path)
+
+    def _pick_musicbrainz_hit(self, hits: List[MBRecordingHit]) -> Optional[MBRecordingHit]:
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Select a match")
+        layout = QVBoxLayout(dlg)
+        layout.addWidget(QLabel("Pick the best MusicBrainz match:"))
+
+        lst = QListWidget(dlg)
+        for h in hits:
+            year = (h.date or "").split("-")[0] if h.date else ""
+            extra = ""
+            if h.release:
+                extra = f" — {h.release}"
+            if year:
+                extra += f" ({year})"
+            it = QListWidgetItem(f"{h.title} — {h.artist}{extra}")
+            it.setData(Qt.UserRole, h)
+            lst.addItem(it)
+        lst.setCurrentRow(0)
+        layout.addWidget(lst, 1)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        layout.addWidget(buttons)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+
+        if dlg.exec() != QDialog.Accepted:
+            return None
+        sel = lst.selectedItems()
+        return sel[0].data(Qt.UserRole) if sel else None
+
     # ---------- Exit combo + paging ----------
 
     def _exit_combo_active(self) -> bool:
@@ -207,20 +554,67 @@ class StageProWindow(QMainWindow):
         if self._exit_combo_active():
             self.close()
 
+    def _maybe_handle_onstage_toggle_combo(self, key: int) -> bool:
+        """Detect a quick 'both footswitch buttons' press.
+
+        Many pedals are configured to emit PageUp/PageDown. We detect a combo
+        when both keys are pressed within a short window.
+        """
+        if key not in (Qt.Key_PageUp, Qt.Key_PageDown, Qt.Key_Left, Qt.Key_Right):
+            return False
+
+        # Don't retrigger until both keys are released.
+        if self._combo_latched:
+            return False
+
+        # Use monotonic time for stable key timing.
+        import time
+        now_ms = int(time.monotonic() * 1000)
+        self._last_pedal_down[key] = now_ms
+
+        # Determine pair
+        if key in (Qt.Key_PageUp, Qt.Key_PageDown):
+            other = Qt.Key_PageDown if key == Qt.Key_PageUp else Qt.Key_PageUp
+        else:
+            other = Qt.Key_Right if key == Qt.Key_Left else Qt.Key_Left
+
+        other_ts = self._last_pedal_down.get(other)
+        if other_ts is None:
+            return False
+
+        if abs(now_ms - other_ts) <= self._combo_window_ms:
+            self._combo_latched = True
+            self._toggle_mode()
+            return True
+
+        return False
+
     def eventFilter(self, obj, event):
         if event.type() == QEvent.KeyPress and not event.isAutoRepeat():
             k = event.key()
+            # Ctrl+F toggles maintenance <-> on-stage
+            if k == Qt.Key_F and (event.modifiers() & Qt.ControlModifier):
+                self._toggle_mode()
+                return True
+
+            # Quick "both footswitch buttons" toggle (usually PageUp/PageDown)
+            if self._maybe_handle_onstage_toggle_combo(k):
+                return True
+
             self.pressed_keys.add(k)
             self._start_or_stop_exit_timer()
 
-            # paging keys handled globally
+            # navigation
             if k in (Qt.Key_PageDown, Qt.Key_Right):
                 if self._exit_combo_active():
                     return True
                 if (Qt.Key_Left in self.pressed_keys and Qt.Key_Right in self.pressed_keys) or \
                    (Qt.Key_PageUp in self.pressed_keys and Qt.Key_PageDown in self.pressed_keys):
                     return True
-                self.next_page()
+                if self.mode == "onstage":
+                    self.next_page()
+                else:
+                    self.maint_song_list.setCurrentRow(min(self.maint_song_list.count() - 1, self.maint_song_list.currentRow() + 1))
                 return True
 
             if k in (Qt.Key_PageUp, Qt.Key_Left):
@@ -229,13 +623,21 @@ class StageProWindow(QMainWindow):
                 if (Qt.Key_Left in self.pressed_keys and Qt.Key_Right in self.pressed_keys) or \
                    (Qt.Key_PageUp in self.pressed_keys and Qt.Key_PageDown in self.pressed_keys):
                     return True
-                self.prev_page()
+                if self.mode == "onstage":
+                    self.prev_page()
+                else:
+                    self.maint_song_list.setCurrentRow(max(0, self.maint_song_list.currentRow() - 1))
                 return True
 
         if event.type() == QEvent.KeyRelease and not event.isAutoRepeat():
             k = event.key()
             self.pressed_keys.discard(k)
             self._start_or_stop_exit_timer()
+
+            # Unlatch combo when all relevant keys are released
+            if k in (Qt.Key_PageUp, Qt.Key_PageDown, Qt.Key_Left, Qt.Key_Right):
+                if not any(x in self.pressed_keys for x in (Qt.Key_PageUp, Qt.Key_PageDown, Qt.Key_Left, Qt.Key_Right)):
+                    self._combo_latched = False
             if k in (Qt.Key_PageUp, Qt.Key_PageDown, Qt.Key_Left, Qt.Key_Right):
                 return True
 

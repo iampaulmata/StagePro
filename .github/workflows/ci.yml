@@ -125,7 +125,9 @@ jobs:
         shell: pwsh
         run: |
           Remove-Item -Recurse -Force build, dist -ErrorAction SilentlyContinue
-          pyinstaller stagepro.windows.spec --clean
+          Get-ChildItem -Recurse -Filter "stagepro*.spec" | Select-Object FullName
+          cd "$env:GITHUB_WORKSPACE"
+          pyinstaller packaging/stagepro.windows.spec --clean
 
       - name: Package portable zip (Windows)
         if: matrix.platform == 'windows'
