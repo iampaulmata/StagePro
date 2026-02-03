@@ -18,7 +18,7 @@ jobs:
       - name: System deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y libfuse2 fuse patchelf qmake6 qt6-base-dev-tools
+          sudo apt-get install -y libfuse2 fuse patchelf qmake6 qt6-base-dev-tools libxcb-cursor0
 
       - name: Get AppImage tools
         run: |
