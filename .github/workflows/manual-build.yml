@@ -120,6 +120,7 @@ jobs:
         shell: pwsh
         run: |
           Remove-Item -Recurse -Force build, dist -ErrorAction SilentlyContinue
+          Get-ChildItem -Recurse -Filter "stagepro*.spec" | Select-Object FullName
           cd "$env:GITHUB_WORKSPACE"
           pyinstaller packaging/stagepro.windows.spec --clean
 
