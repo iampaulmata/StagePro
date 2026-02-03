@@ -146,7 +146,7 @@ rm -f  "$APPDIR/usr/lib/libQt63D"* "$APPDIR/usr/lib/libQt6Location"* "$APPDIR/us
 export DEBUG=1
 env -u LD_LIBRARY_PATH -u QT_PLUGIN_PATH -u QML2_IMPORT_PATH -u QT_QPA_PLATFORM_PLUGIN_PATH \
   QMAKE="$QMAKE" DEBUG="$DEBUG" \
-  "$LINUXDEPLOY" --appdir "$APPDIR" --plugin qt --output appimage
+  "$LINUXDEPLOY" --appdir "$APPDIR" --output appimage
 
 # ---------- normalize output name ----------
 OUT="$(ls -1 ./*.AppImage | head -n 1)"
