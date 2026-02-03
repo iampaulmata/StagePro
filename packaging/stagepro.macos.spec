@@ -1,19 +1,31 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import os
+from pathlib import Path
+
 block_cipher = None
 
+# PyInstaller defines SPECPATH as the directory containing the spec file
+SPEC_DIR = Path(globals().get("SPECPATH", os.getcwd())).resolve()
+PROJECT_ROOT = SPEC_DIR.parent  # packaging/ -> repo root
+
+# (Optional) keep the debug for one run, then remove
+print("SPEC DEBUG cwd =", os.getcwd())
+print("SPEC DEBUG SPECPATH =", SPEC_DIR)
+print("SPEC DEBUG PROJECT_ROOT =", PROJECT_ROOT)
+
 datas = [
-    ("themes", "themes"),
-    ("assets", "assets"),
-    ("stagepro_config.example.json", "."),
-    ("README.md", "."),
-    ("LICENSE.md", "."),
-    ("CONTRIBUTORS.md", "."),
+    (str(PROJECT_ROOT / "themes"), "themes"),
+    (str(PROJECT_ROOT / "assets"), "assets"),
+    (str(PROJECT_ROOT / "stagepro_config.example.json"), "."),
+    (str(PROJECT_ROOT / "README.md"), "."),
+    (str(PROJECT_ROOT / "LICENSE.md"), "."),
+    (str(PROJECT_ROOT / "CONTRIBUTORS.md"), "."),
 ]
 
 a = Analysis(
-    ["stagepro.py"],
-    pathex=["."],
+    [str(PROJECT_ROOT / "stagepro.py")],
+    pathex=[str(PROJECT_ROOT)],
     binaries=[],
     datas=datas,
     hiddenimports=[],
@@ -21,7 +33,6 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
-        # keep the same trims as Linux where applicable
         "PySide6.QtTextToSpeech",
         "PySide6.QtLocation",
         "PySide6.QtPositioning",
@@ -47,13 +58,13 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
-    console=False,   # windowed app
+    console=False,
 )
 
 app = BUNDLE(
     exe,
     name="StagePro.app",
-    icon=None,       # add .icns later
+    icon=None,
 )
 
 coll = COLLECT(
