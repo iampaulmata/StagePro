@@ -402,6 +402,17 @@ class StageProWindow(QMainWindow):
         pl = self.playlists.get_active()
         playlist_names = list(pl.items)
 
+
+        # Prune stale playlist entries that no longer exist on disk
+        missing_idxs = [i for i, name in enumerate(playlist_names) if not (self.songs_dir / name).exists()]
+        if missing_idxs:
+            try:
+                self.playlists.remove_items_by_index(pl.playlist_id, missing_idxs)
+            except Exception:
+                pass
+            pl = self.playlists.get_active()
+            playlist_names = list(pl.items)
+
         # Library: all files in songs_dir (alpha)
         lib_paths = list_song_files_alpha(self.songs_dir, self.cfg)
         lib_names = [p.name for p in lib_paths]
@@ -458,7 +469,12 @@ class StageProWindow(QMainWindow):
         if not path:
             self.maint_preview.setPlainText("")
             return
+
         self._preview_song_in_maintenance(path)
+
+        # If selection is from the playlist list, make it the active on-stage song too.
+        if self.maint_playlist_list.selectedItems():
+            self._sync_active_song_to_path(path)
 
     def _selected_path_for_preview(self) -> Optional[Path]:
         """Return selected song Path from either playlist or library list."""
@@ -470,11 +486,66 @@ class StageProWindow(QMainWindow):
             return Path(lib_items[0].data(Qt.UserRole))
         return None
 
+    
+    def _sync_active_song_to_path(self, path: Path) -> None:
+            """Sync the active on-stage song to the given path if it's in the current playable list."""
+            self._refresh_song_list()
+            if not self.song_files:
+                return
+            try:
+                target = path.resolve()
+            except Exception:
+                target = path
+            idx = None
+            for i, p in enumerate(self.song_files):
+                try:
+                    if p.resolve() == target:
+                        idx = i
+                        break
+                except Exception:
+                    if p == path:
+                        idx = i
+                        break
+            if idx is None:
+                return
+            if idx != self.song_idx:
+                self.load_song_by_index(idx)
+
+
     def _preview_song_in_maintenance(self, path: Path) -> None:
+        # Guard against stale playlist entries / deleted files
+        if not path.exists():
+            msg = f"Song file not found:\n{path}"
+            self.maint_status.setText(f"Missing: {path.name} (removing stale entry if needed)")
+            self.maint_preview.setPlainText(msg)
+            QMessageBox.warning(self, "StagePro - Missing song file", msg)
+
+            # If this came from the playlist list, remove it from the active playlist
+            pl_items = self.maint_playlist_list.selectedItems()
+            if pl_items:
+                row = self.maint_playlist_list.currentRow()
+                pl = self.playlists.get_active()
+                if row >= 0 and pl and pl.playlist_id:
+                    try:
+                        self.playlists.remove_items_by_index(pl.playlist_id, [row])
+                    except Exception:
+                        pass
+                    self._refresh_maintenance_list(preserve_selection=False)
+                    self._load_first_song_or_welcome()
+            return
+
         try:
-            text = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            text = path.read_text(encoding="latin-1")
+            try:
+                text = path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                text = path.read_text(encoding="latin-1")
+        except FileNotFoundError:
+            # Race: file removed after exists() check
+            msg = f"Song file not found:\n{path}"
+            self.maint_status.setText(f"Missing: {path.name} (it may have been moved/deleted)")
+            self.maint_preview.setPlainText(msg)
+            QMessageBox.warning(self, "StagePro - Missing song file", msg)
+            return
 
         try:
             song = parse_chordpro(text)

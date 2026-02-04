@@ -1,116 +1,128 @@
 # StagePro 🎸
 
-StagePro is a **Linux-first, cross-platform stage lyrics viewer** designed for live performance.  
-It displays ChordPro songs in a clean, readable format and supports **hands-free navigation via Bluetooth foot pedals**, allowing musicians to stay focused on the performance instead of a screen.
+**StagePro** is a **Linux-first, cross-platform stage lyrics and chart viewer** designed for live performance.  
+It renders **ChordPro** songs in a clean, readable, stage-friendly layout and supports **hands-free control via Bluetooth or USB foot pedals**.
 
-StagePro is currently in **beta** and actively evolving.
+StagePro is built for musicians who want:
+- Zero distractions on stage
+- Reliable setlists
+- Fast navigation
+- Clear, customizable visuals
 
----
-
-## ✨ Features
-
-- 🎵 **ChordPro support**
-  - Displays lyrics with chords and structured sections
-- 🦶 **Bluetooth foot-pedal navigation**
-  - Page Up / Page Down
-  - Left / Right arrow keys
-- 📁 **Portable songs folder**
-  - Drop a `songs/` folder next to the AppImage
-  - Falls back to a per-user data directory automatically
-- 🎨 **Theming support**
-  - Custom colors and styles for sections like chorus, bridge, etc.
-- 🐧 **Linux AppImage distribution**
-  - No installation required
-  - Works across modern Linux distributions
+StagePro is currently in **beta**, but is already gig-ready.
 
 ---
 
-## 📦 Download & Run (Linux)
+## 🌍 Cross-Platform Vision
 
-Download the latest AppImage from the **GitHub Releases** page.
+StagePro is designed from the start to be **cross-platform**.
 
-```bash
-chmod +x StagePro-0.1.0-beta-x86_64.AppImage
-./StagePro-0.1.0-beta-x86_64.AppImage
-```
+### Current Status
+- ✅ **Linux** (primary platform, AppImage distribution)
+- 🧪 **Windows & macOS** (planned and actively being prepared)
+- 🚧 **Android** (coming soon)
+
+The long-term goal is for StagePro to run on:
+- Laptops
+- Mini PCs
+- Tablets
+- Dedicated stage devices
+
+…with the same playlists, songs, and themes across all platforms.
 
 ---
 
-## 📂 Songs Folder Layout
+## ✨ Core Features
 
-StagePro searches for songs in the following order:
+### 🎵 ChordPro Song Support
+- Supports `.cho`, `.chopro`, and `.pro` files and `.txt` files that have ChordPro tags
+- Parses:
+  - Lyrics and chords
+  - Sections (`{verse}`, `{chorus}`, `{bridge}`, `{comment}`, etc.)
+- Displays long songs cleanly in a scrollable, paged format optimized for stage use
 
-1. A `songs/` folder **next to the AppImage or executable**
+---
+
+### 📋 Playlists & Setlists
+- Create and manage playlists (setlists) inside StagePro
+- Playlists reference song filenames (non-destructive)
+- Reorder songs for live performance
+- Quickly switch between playlists during rehearsal or shows
+
+**Robust handling of missing files**
+- If a song file is deleted or moved outside StagePro:
+  - The app does **not crash**
+  - The missing entry is detected
+  - The user is warned
+  - The stale playlist entry is automatically removed
+
+---
+
+### 🛠️ Maintenance Mode vs On-Stage Mode
+
+StagePro has two distinct modes:
+
+#### Maintenance Mode
+Used for preparation and setup:
+- Browse library and playlists
+- Preview songs
+- Edit order
+- Verify formatting and themes
+
+Selecting a song in Maintenance Mode:
+- Updates the preview **and**
+- Sets the song as the **active on-stage selection**
+
+This guarantees that when you switch to On-Stage Mode, the correct song is shown.
+
+#### On-Stage Mode
+Designed for live performance:
+- Clean, distraction-free display
+- Optimized contrast and spacing
+- Controlled entirely by keyboard or foot pedal
+- No accidental song changes
+
+You can switch modes instantly.
+
+---
+
+### 🦶 Foot Pedal & Keyboard Control
+
+StagePro works with any foot pedal that sends standard keyboard events.
+
+#### Supported Controls
+- **Page Up / Page Down** — Scroll lyrics
+- **Left / Right Arrow** — Navigate between songs
+- **Ctrl + F** (or configured pedal combo) — Toggle Maintenance / On-Stage mode
+
+Most Bluetooth and USB pedals work out of the box once paired with the OS.
+
+---
+
+### 🎨 Theme System
+
+StagePro supports **fully customizable themes** that control how songs are rendered.
+
+Themes allow you to define colors and styles for:
+- Verse
+- Chorus
+- Bridge
+- Comment
+- Titles and metadata
+
+#### Theme Highlights
+- Themes are defined as **shareable files**
+- Designed for high-contrast stage visibility
+- Multiple themes can coexist
+- Future releases will expand theme options and presets
+
+Themes are loaded automatically at startup.
+
+---
+
+### 📁 Flexible Songs Folder Handling
+
+StagePro looks for songs in the following order:
+
+1. A `songs/` folder **next to the executable or AppImage**
 2. The user data directory:
-   ```
-   ~/.local/share/stagepro/songs
-   ```
-
-Songs should be in **ChordPro format** (`.cho`, `.chopro`, or `.pro`).
-
-Example directory structure:
-
-```
-StagePro-0.1.0-beta-x86_64.AppImage
-songs/
- ├── song1.cho
- ├── song2.cho
- └── setlists/
-     └── opener.cho
-```
-
----
-
-## 🦶 Foot Pedal Support
-
-StagePro works with Bluetooth foot pedals that send standard keyboard events.
-
-Supported keys:
-- **Page Up / Page Down**
-- **Left / Right arrows**
-
-Most pedals work out of the box once paired with your operating system — no additional configuration is required.
-
----
-
-## 🎨 Themes
-
-StagePro supports theming to control how different song sections are displayed (e.g., chorus, verse, bridge).
-
-Themes are stored in the `themes/` directory and can be customized or extended.  
-More documentation and shareable themes are planned for future releases.
-
----
-
-## ⚠️ Beta Status
-
-This is an **early beta release**.
-
-- UI and theming may change
-- Configuration options are still evolving
-- Some edge cases may exist
-
-Bug reports and feature requests are welcome via GitHub Issues.
-
----
-
-## 🛠️ Development
-
-StagePro is built with:
-
-- Python
-- PySide6 (Qt)
-- ChordPro parsing
-- Linux-first packaging via AppImage
-
-The project prioritizes **stage usability**, **portability**, and **low-friction setup** for musicians.
-
----
-
-## 📜 License
-
-See [LICENSE.md](LICENSE.md).
-
----
-
-Rock on 🤘
