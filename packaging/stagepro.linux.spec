@@ -11,7 +11,7 @@ datas = [
     (str(ROOT / "stagepro_config.example.json"), "."),
     (str(ROOT / "README.md"), "."),
     (str(ROOT / "LICENSE.md"), "."),
-    (str(ROOT / "CONTRIBUTORS.md"), "."),
+    (str(ROOT / "CONTRIBUTING.md"), "."),
 ]
 
 a = Analysis(
