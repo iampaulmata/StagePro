@@ -1,6 +1,8 @@
-# 🎤 StagePro
+<div style="text-align: center;">
+  <img src="assets/stagepro.png" width=25%>
+</div>
 
-[StagePro Logo](assets/stagepro.png)
+# 🎤 StagePro
 
 **StagePro** is a cross-platform, musician-focused lyrics and chord prompter designed for **live performance**.  
 It is built around **ChordPro** song files, supports **foot-switch control**, and cleanly separates **on-stage use** from **setlist and library management**.
@@ -11,11 +13,9 @@ StagePro is designed to run reliably on laptops, mini PCs, and stage wedges — 
 
 ## 📸 Screenshots
 
-[StagePro Performance View](assets/stagepro_performance_mode.png)
-[StagePro Maintenance View](assets/stagepro_maintenance_mode.png)
-[StagePro Preferences Window](assets/sstagepro_preferences.png)
-
-
+![StagePro Maintenance View](assets/stagepro_maintenance_mode.png)
+![StagePro Performance View](assets/stagepro_performance_mode.png)
+![StagePro Preferences Window](assets/stagepro_preferences.png)
 ---
 
 ## ✨ Key Features
@@ -97,3 +97,85 @@ Download the `.AppImage`, make it executable, and run:
 ```bash
 chmod +x StagePro-*.AppImage
 ./StagePro-*.AppImage
+```
+
+### Windows
+Download the Windows build and run `StagePro.exe`.
+
+### macOS
+Download the `.app` bundle or zip, extract, and launch.
+
+---
+
+## 🧪 Building From Source
+
+### Requirements
+- Python 3.11+
+- PySide6
+- PyInstaller (for packaging)
+
+### Clone & Run
+```bash
+git clone https://github.com/<your-org>/stagepro.git
+cd stagepro
+python -m venv .venv
+source .venv/bin/activate   # or .venv\Scripts\activate on Windows
+pip install -r requirements.txt
+python stagepro.py
+```
+
+### Packaging
+Platform-specific build scripts/spec files are included for:
+- Linux AppImage
+- Windows executable
+- macOS app bundle
+
+---
+
+## 📁 File Structure (Overview)
+
+```
+stagepro/
+├── stagepro/
+│   ├── ui_main.py
+│   ├── config.py
+│   ├── render.py
+│   ├── paginate.py
+│   └── ...
+├── themes/
+│   ├── blueroom.json
+│   ├── greenroom.json
+│   └── ...
+├── songs/
+│   └── *.cho
+├── packaging/
+│   └── build scripts
+└── README.md
+```
+
+---
+
+## 🎯 Philosophy
+
+StagePro is intentionally:
+- **Offline-first**
+- **Performance-focused**
+- **Readable at a glance**
+- **Predictable under pressure**
+
+No cloud dependency. No account required. No surprises mid-set.
+
+---
+
+## 📜 License
+
+MIT License  
+See `LICENSE` for details.
+
+---
+
+## 🙌 Credits & Contributions
+
+StagePro is actively developed and open to contributions.
+
+Bug reports, feature requests, and pull requests are welcome.
