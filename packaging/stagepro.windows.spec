@@ -4,34 +4,39 @@
 import os
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
-
-# Resolve paths robustly:
-# PyInstaller sets SPECPATH to the directory containing this spec file.
 SPEC_DIR = Path(globals().get("SPECPATH", os.getcwd())).resolve()
-PROJECT_ROOT = SPEC_DIR.parent  # packaging/ -> repo root
-
-# Let PyInstaller's PySide6 hooks do the heavy lifting.
-# We just make sure plugins/dlls and our app data are present.
-pyside6_bins = collect_dynamic_libs("PySide6")
-pyside6_data = collect_data_files("PySide6")
+PROJECT_ROOT = SPEC_DIR.parent
 
 a = Analysis(
     [str(PROJECT_ROOT / "stagepro.py")],
     pathex=[str(PROJECT_ROOT)],
-    binaries=pyside6_bins,
-    datas=(
-        pyside6_data
-        + [
-            (str(PROJECT_ROOT / "themes"), "themes"),
-            (str(PROJECT_ROOT / "assets"), "assets"),
-            (str(PROJECT_ROOT / "stagepro_config.example.json"), "."),
-        ]
-    ),
+    binaries=[],   # <-- do NOT collect all PySide6 binaries
+    datas=[
+        (str(PROJECT_ROOT / "themes"), "themes"),
+        (str(PROJECT_ROOT / "assets"), "assets"),
+        (str(PROJECT_ROOT / "stagepro_config.example.json"), "."),
+    ],
     hiddenimports=[],
     hookspath=[],
     runtime_hooks=[],
-    excludes=[],
+    excludes=[
+        # Exclude Qt modules you very likely don't use
+        "PySide6.QtMultimedia",
+        "PySide6.QtMultimediaWidgets",
+        "PySide6.QtNetwork",
+        "PySide6.QtOpenGL",
+        "PySide6.QtOpenGLWidgets",
+        "PySide6.QtPrintSupport",
+        "PySide6.QtQml",
+        "PySide6.QtQuick",
+        "PySide6.QtQuickWidgets",
+        "PySide6.QtSql",
+        "PySide6.QtTest",
+        "PySide6.QtWebEngineCore",
+        "PySide6.QtWebEngineWidgets",
+        "PySide6.QtWebChannel",
+        "PySide6.QtWebSockets",
+    ],
     noarchive=False,
 )
 
@@ -45,7 +50,7 @@ exe = EXE(
     name="StagePro",
     debug=False,
     strip=False,
-    upx=False,
+    upx=False,     # set True if you install UPX
     console=False,
     icon=str(PROJECT_ROOT / "assets" / "stagepro.ico"),
 )
@@ -53,7 +58,7 @@ exe = EXE(
 coll = COLLECT(
     exe,
     a.binaries,
-    a.zipfiles,  # include this so anything PyInstaller marks as zipfiles is collected too
+    a.zipfiles,
     a.datas,
     strip=False,
     upx=False,
