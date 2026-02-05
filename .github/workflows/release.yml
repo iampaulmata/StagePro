@@ -122,7 +122,7 @@ jobs:
         shell: pwsh
         run: |
           Remove-Item -Recurse -Force build, dist -ErrorAction SilentlyContinue
-          pyinstaller stagepro.windows.spec --clean
+          pyinstaller packaging\stagepro.windows.spec --clean
 
       - name: Package portable zip (Windows)
         if: matrix.platform == 'windows'
