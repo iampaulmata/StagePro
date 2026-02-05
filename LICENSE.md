@@ -1,11 +1,3 @@
-
----
-
-## `LICENSE` (MIT)
-
-If you want a different license (GPL, Apache-2.0), say so — but MIT is a common default for small open-source apps.
-
-```text
 MIT License
 
 Copyright (c) 2026
