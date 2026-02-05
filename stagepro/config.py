@@ -72,9 +72,9 @@ def get_user_config_dir() -> Path:
 
 def default_config() -> dict:
     return {
-        "orientation": "landscape",     # "landscape" or "portrait"
-        "rotation_deg": 0,             # 0, 90, 180, 270 (applies to the whole view)
-        "portrait_rotation": 90,        # legacy: used when orientation=="portrait" and rotation_deg missing
+        "orientation": "portrait",
+        "rotation_deg": 90,
+        "portrait_rotation": 90, # deprecated; use rotation_deg
         "font": {
             "family": "DejaVu Sans",
             "size_px": 34,

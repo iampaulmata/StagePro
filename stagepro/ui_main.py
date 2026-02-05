@@ -446,12 +446,18 @@ class StageProWindow(QMainWindow):
             self.menuBar().setVisible(False)
             self.showFullScreen()
             self._apply_orientation_transform()
-            self._repaginate_and_render()
+            QTimer.singleShot(0, self._repaginate_and_render)
         else:
             self.stack.setCurrentIndex(0)
             self.menuBar().setVisible(True)
+
+            # IMPORTANT: explicitly leave fullscreen before trying to resize/maximize
+            self.showNormal()
+            self.setWindowState(self.windowState() & ~Qt.WindowFullScreen)
+
             self.showMaximized()
             self._refresh_maintenance_list(preserve_selection=True)
+
 
     def _toggle_mode(self) -> None:
         self._set_mode("onstage" if self.mode != "onstage" else "maintenance")
@@ -1203,10 +1209,28 @@ class StageProWindow(QMainWindow):
         h = max(200, int(self.viewer.height()))
         return w, h
 
+    def _layout_doc_size(self) -> tuple[int, int]:
+        """
+        Returns logical (reading) width/height for pagination.
+        This is independent of visual rotation.
+        """
+        vw = max(200, int(self.view.viewport().width()))
+        vh = max(200, int(self.view.viewport().height()))
+
+        margin = self._fit_margin_px()
+        vw -= 2 * margin
+        vh -= 2 * margin
+
+        if self._is_portrait():
+            # Reading is vertical: height is long axis
+            return min(vw, vh), max(vw, vh)
+        else:
+            return max(vw, vh), min(vw, vh)
+
     def _repaginate_and_render(self):
         if not self.song:
             return
-        w, h = self._available_doc_size()
+        w, h = self._layout_doc_size()
         filename = self.song_files[self.song_idx].name if self.song_files else "Untitled"
         chunks = song_to_chunks(self.song)
         #cfg = self.effective_cfg()
