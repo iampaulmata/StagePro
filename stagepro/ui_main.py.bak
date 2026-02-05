@@ -316,8 +316,39 @@ class StageProWindow(QMainWindow):
         self._load_first_song_or_welcome()
         self._refresh_maintenance_list()
         self._set_mode("maintenance")
+        self._dump_sizes("after init")
+
 
     # ---------- Config helpers ----------
+    
+    # Debugging helper
+    def _dump_sizes(self, tag: str) -> None:
+        def fmt(w):
+            return f"{w.__class__.__name__} size={w.size().width()}x{w.size().height()} " \
+                f"min={w.minimumSize().width()}x{w.minimumSize().height()} " \
+                f"max={w.maximumSize().width()}x{w.maximumSize().height()} " \
+                f"hint={w.sizeHint().width()}x{w.sizeHint().height()} " \
+                f"minHint={w.minimumSizeHint().width()}x{w.minimumSizeHint().height()}"
+
+        print(f"\n[geom] {tag} mode={self.mode} windowState={self.windowState()!r}")
+        print("[geom] window:", fmt(self))
+        print("[geom] stack :", fmt(self.stack))
+        print("[geom] maint :", fmt(self.maint_root))
+        print("[geom] view  :", fmt(self.view))
+        print("[geom] viewer:", fmt(self.viewer))
+
+    def _release_onstage_size_constraints(self) -> None:
+        # Remove fixed constraints so maintenance resizing isn’t affected by the hidden page.
+        self.viewer.setMinimumSize(0, 0)
+        self.viewer.setMaximumSize(16777215, 16777215)  # Qt “infinite”
+        self.viewer.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+
+        self.view.setMinimumSize(0, 0)
+        self.view.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+
+        # Let stacked widget shrink based on current page
+        self.stack.setMinimumSize(0, 0)
+
 
     def _theme_path(self) -> str:
         """
@@ -425,12 +456,15 @@ class StageProWindow(QMainWindow):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        if self.mode != "onstage":
+            return
         self._fit_view_to_content()
-        # Re-paginate on resize because wrapping changes height
         self._repaginate_and_render()
 
     def showEvent(self, event):
         super().showEvent(event)
+        if self.mode != "onstage":
+            return
         self._apply_orientation_transform()
         self._repaginate_and_render()
 
@@ -447,11 +481,13 @@ class StageProWindow(QMainWindow):
             self.menuBar().setVisible(False)
             self.showFullScreen()
             self._apply_orientation_transform()
-            self._repaginate_and_render()
+            QTimer.singleShot(0, self._repaginate_and_render)
         else:
             self.stack.setCurrentIndex(0)
             self.menuBar().setVisible(True)
-            self.showMaximized()
+            self._release_onstage_size_constraints()
+            self.showNormal()         # ensure not stuck in WM state
+            # (Optional: self.showMaximized() only if you want default full-window)
             self._refresh_maintenance_list(preserve_selection=True)
 
     def _toggle_mode(self) -> None:
@@ -466,39 +502,29 @@ class StageProWindow(QMainWindow):
         outer.setContentsMargins(8, 8, 8, 8)
         outer.setSpacing(6)
 
-                # Make the top controls portrait-friendly by using two rows instead of one long horizontal bar.
-        # (A single wide row can force an oversized minimum window width on rotated/portrait displays.)
-        self.cmb_playlist.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.cmb_playlist.setMinimumContentsLength(8)
-        try:
-            self.cmb_playlist.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
-        except Exception:
-            # Older Qt builds may not expose this enum; it's safe to ignore.
-            pass
+        top_row = QHBoxLayout()
+        top_row.addWidget(self.btn_import)
+        top_row.addSpacing(6)
+        top_row.addWidget(self.btn_mb_autofill)
+        top_row.addStretch(1)
+        top_row.addWidget(QLabel("Playlist:"))
+        top_row.addWidget(self.cmb_playlist)
+        top_row.addWidget(self.btn_pl_new)
+        top_row.addWidget(self.btn_pl_rename)
+        top_row.addWidget(self.btn_pl_dup)
+        top_row.addWidget(self.btn_pl_del)
 
-        row1 = QHBoxLayout()
-        row1.addWidget(self.btn_import)
-        row1.addSpacing(6)
-        row1.addWidget(self.btn_mb_autofill)
-        row1.addStretch(1)
-        row1.addWidget(QLabel("Playlist:"))
-        row1.addWidget(self.cmb_playlist, 1)
-        row1.addWidget(self.btn_pl_new)
-        row1.addWidget(self.btn_pl_rename)
-        row1.addWidget(self.btn_pl_dup)
-        row1.addWidget(self.btn_pl_del)
+        top_row.addSpacing(12)
+        top_row.addWidget(QLabel("Order:"))
+        top_row.addWidget(self.btn_move_up)
+        top_row.addWidget(self.btn_move_down)
+        top_row.addWidget(self.btn_add_to_set)
+        top_row.addWidget(self.btn_remove_from_set)
 
-        row2 = QHBoxLayout()
-        row2.addWidget(QLabel("Order:"))
-        row2.addWidget(self.btn_move_up)
-        row2.addWidget(self.btn_move_down)
-        row2.addWidget(self.btn_add_to_set)
-        row2.addWidget(self.btn_remove_from_set)
-        row2.addStretch(1)
-        row2.addWidget(self.btn_save_setlist)  # export-to-setlist.txt (legacy compatibility)
+        top_row.addSpacing(12)
+        top_row.addWidget(self.btn_save_setlist)  # keep as export-to-setlist.txt for now
 
-        outer.addLayout(row1)
-        outer.addLayout(row2)
+        outer.addLayout(top_row)
 
         split = QSplitter(Qt.Horizontal)
         split.addWidget(self.maint_left)
@@ -1214,10 +1240,21 @@ class StageProWindow(QMainWindow):
         h = max(200, int(self.viewer.height()))
         return w, h
 
+    def _layout_doc_size(self) -> tuple[int, int]:
+        margin = self._fit_margin_px()
+        vp = self.view.viewport().size()
+
+        vw = max(200, int(vp.width()) - 2 * margin)
+        vh = max(200, int(vp.height()) - 2 * margin)
+
+        if self._is_portrait():
+            return vh, vw
+        return vw, vh
+
     def _repaginate_and_render(self):
         if not self.song:
             return
-        w, h = self._available_doc_size()
+        w, h = self._layout_doc_size()
         filename = self.song_files[self.song_idx].name if self.song_files else "Untitled"
         chunks = song_to_chunks(self.song)
         #cfg = self.effective_cfg()
