@@ -73,13 +73,14 @@ def get_user_config_dir() -> Path:
 def default_config() -> dict:
     return {
         "orientation": "landscape",     # "landscape" or "portrait"
-        "portrait_rotation": 90,        # 90 or 270
+        "rotation_deg": 0,             # 0, 90, 180, 270 (applies to the whole view)
+        "portrait_rotation": 90,        # legacy: used when orientation=="portrait" and rotation_deg missing
         "font": {
             "family": "DejaVu Sans",
             "size_px": 34,
             "line_height": 1.15,
-            "chord_size_factor": 0.70,  # chord font relative to lyric font
-            "chord_pad_em": 0.95        # vertical room reserved above lyrics
+            "chord_size_factor": 0.70,
+            "chord_pad_em": 0.95
         },
         "colors": {
             "background": "#000000",

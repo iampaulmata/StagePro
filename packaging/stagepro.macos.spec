@@ -20,7 +20,7 @@ datas = [
     (str(PROJECT_ROOT / "stagepro_config.example.json"), "."),
     (str(PROJECT_ROOT / "README.md"), "."),
     (str(PROJECT_ROOT / "LICENSE.md"), "."),
-    (str(PROJECT_ROOT / "CONTRIBUTORS.md"), "."),
+    (str(PROJECT_ROOT / "CONTRIBUTING.md"), "."),
 ]
 
 a = Analysis(
