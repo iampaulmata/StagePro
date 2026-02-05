@@ -1,128 +1,99 @@
-# StagePro 🎸
+# 🎤 StagePro
 
-**StagePro** is a **Linux-first, cross-platform stage lyrics and chart viewer** designed for live performance.  
-It renders **ChordPro** songs in a clean, readable, stage-friendly layout and supports **hands-free control via Bluetooth or USB foot pedals**.
+[StagePro Logo](assets/stagepro.png)
 
-StagePro is built for musicians who want:
-- Zero distractions on stage
-- Reliable setlists
-- Fast navigation
-- Clear, customizable visuals
+**StagePro** is a cross-platform, musician-focused lyrics and chord prompter designed for **live performance**.  
+It is built around **ChordPro** song files, supports **foot-switch control**, and cleanly separates **on-stage use** from **setlist and library management**.
 
-StagePro is currently in **beta**, but is already gig-ready.
+StagePro is designed to run reliably on laptops, mini PCs, and stage wedges — even **offline at a gig**.
 
 ---
 
-## 🌍 Cross-Platform Vision
+## 📸 Screenshots
 
-StagePro is designed from the start to be **cross-platform**.
+[StagePro Performance View](assets/stagepro_performance_mode.png)
+[StagePro Maintenance View](assets/stagepro_maintenance_mode.png)
+[StagePro Preferences Window](assets/sstagepro_preferences.png)
 
-### Current Status
-- ✅ **Linux** (primary platform, AppImage distribution)
-- 🧪 **Windows & macOS** (planned and actively being prepared)
-- 🚧 **Android** (coming soon)
-
-The long-term goal is for StagePro to run on:
-- Laptops
-- Mini PCs
-- Tablets
-- Dedicated stage devices
-
-…with the same playlists, songs, and themes across all platforms.
 
 ---
 
-## ✨ Core Features
+## ✨ Key Features
 
-### 🎵 ChordPro Song Support
-- Supports `.cho`, `.chopro`, and `.pro` files and `.txt` files that have ChordPro tags
-- Parses:
-  - Lyrics and chords
-  - Sections (`{verse}`, `{chorus}`, `{bridge}`, `{comment}`, etc.)
-- Displays long songs cleanly in a scrollable, paged format optimized for stage use
+### 🎶 Performance-First Design
+- Dedicated **On-Stage Mode** (fullscreen, distraction-free)
+- **Maintenance Mode** for managing songs, playlists, and metadata
+- Optimized for **portrait or landscape** stage displays
+- Works fully **offline**
 
----
+### 📄 ChordPro Native
+- Uses standard `.cho` / ChordPro song files
+- Automatic parsing of lyrics, chords, sections, and directives
+- Graceful handling of minimally formatted or malformed files
 
-### 📋 Playlists & Setlists
-- Create and manage playlists (setlists) inside StagePro
-- Playlists reference song filenames (non-destructive)
-- Reorder songs for live performance
-- Quickly switch between playlists during rehearsal or shows
-
-**Robust handling of missing files**
-- If a song file is deleted or moved outside StagePro:
-  - The app does **not crash**
-  - The missing entry is detected
-  - The user is warned
-  - The stale playlist entry is automatically removed
-
----
-
-### 🛠️ Maintenance Mode vs On-Stage Mode
-
-StagePro has two distinct modes:
-
-#### Maintenance Mode
-Used for preparation and setup:
-- Browse library and playlists
-- Preview songs
-- Edit order
-- Verify formatting and themes
-
-Selecting a song in Maintenance Mode:
-- Updates the preview **and**
-- Sets the song as the **active on-stage selection**
-
-This guarantees that when you switch to On-Stage Mode, the correct song is shown.
-
-#### On-Stage Mode
-Designed for live performance:
-- Clean, distraction-free display
-- Optimized contrast and spacing
-- Controlled entirely by keyboard or foot pedal
-- No accidental song changes
-
-You can switch modes instantly.
-
----
-
-### 🦶 Foot Pedal & Keyboard Control
-
-StagePro works with any foot pedal that sends standard keyboard events.
-
-#### Supported Controls
-- **Page Up / Page Down** — Scroll lyrics
-- **Left / Right Arrow** — Navigate between songs
-- **Ctrl + F** (or configured pedal combo) — Toggle Maintenance / On-Stage mode
-
-Most Bluetooth and USB pedals work out of the box once paired with the OS.
-
----
+### 🎛️ Configurable Display
+- Customizable **font family**
+- Adjustable **font size**
+- Theme-based color system (JSON theme files)
+- Screen **rotation support** (90° / 180° / 270°)
+- Portrait & landscape orientation support
 
 ### 🎨 Theme System
+- Theme files stored as JSON
+- Per-element color control (lyrics, chords, chorus, headers, etc.)
+- User-selectable themes via **Preferences UI**
+- No restart required — updates apply immediately
 
-StagePro supports **fully customizable themes** that control how songs are rendered.
+### 📚 Library & Playlist Management
+- Central song library
+- Multiple playlists (setlists)
+- Add/remove/reorder songs without duplicating files
+- Safe handling of missing or moved files
 
-Themes allow you to define colors and styles for:
-- Verse
-- Chorus
-- Bridge
-- Comment
-- Titles and metadata
+### 🦶 Footswitch & Keyboard Control
+- Page navigation
+- Song navigation
+- Mode switching (Maintenance ↔ On-Stage)
+- Designed for USB foot pedals and keyboard shortcuts
 
-#### Theme Highlights
-- Themes are defined as **shareable files**
-- Designed for high-contrast stage visibility
-- Multiple themes can coexist
-- Future releases will expand theme options and presets
-
-Themes are loaded automatically at startup.
+### 🧠 Smart Metadata
+- Optional **MusicBrainz** integration for metadata autofill
+- Non-destructive updates to song files
 
 ---
 
-### 📁 Flexible Songs Folder Handling
+## 🛠️ Preferences UI
 
-StagePro looks for songs in the following order:
+StagePro includes a built-in **Preferences** window so you never have to edit JSON by hand.
 
-1. A `songs/` folder **next to the executable or AppImage**
-2. The user data directory:
+From **Tools → Preferences…**, you can configure:
+
+- Font family
+- Font size
+- Active theme
+- Orientation (portrait / landscape)
+- Rotation (90° / 180° / 270°)
+
+Changes apply **immediately**.
+
+---
+
+## 💻 Supported Platforms
+
+StagePro is built and tested on:
+
+- 🐧 **Linux** (AppImage)
+- 🪟 **Windows**
+- 🍎 **macOS**
+
+> 📱 **Android support is planned** (touch-friendly on-stage mode).
+
+---
+
+## 📦 Installation
+
+### Linux (Recommended)
+Download the `.AppImage`, make it executable, and run:
+```bash
+chmod +x StagePro-*.AppImage
+./StagePro-*.AppImage
