@@ -19,7 +19,7 @@ jobs:
           - platform: linux
             os: ubuntu-latest
           - platform: macos
-            os: macos-latest
+            os: macos-12
           - platform: windows
             os: windows-latest
 
@@ -122,7 +122,7 @@ jobs:
         shell: pwsh
         run: |
           Remove-Item -Recurse -Force build, dist -ErrorAction SilentlyContinue
-          pyinstaller packaging\stagepro.windows.spec --clean
+          pyinstaller packaging/stagepro.windows.spec --clean
 
       - name: Package portable zip (Windows)
         if: matrix.platform == 'windows'
