@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -63,19 +64,12 @@ jobs:
             StagePro-*.AppImage.sha256
 
       # ---------- macOS ----------
-      - name: Configure toolcache (macOS self-hosted)
+      - name: Use system Python (macOS self-hosted)
         if: matrix.platform == 'macos'
         shell: bash
         run: |
-          echo "RUNNER_TOOL_CACHE=$HOME/hostedtoolcache" >> $GITHUB_ENV
-          mkdir -p "$HOME/hostedtoolcache"
-
-      
-      - uses: actions/setup-python@v5
-        if: matrix.platform == 'macos'
-        with:
-          python-version: "3.12"
-          cache: "pip"
+          python3 --version
+          python3 -m pip --version
 
       - name: Install deps (macOS)
         if: matrix.platform == 'macos'
