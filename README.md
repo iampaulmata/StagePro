@@ -1,5 +1,5 @@
-<div style="text-align: center;">
-  <img src="assets/stagepro.png" width=25%>
+<div align="center">
+  <img src="assets/stagepro.png" align="center" width=25%>
 </div>
 
 # 🎤 StagePro
@@ -7,7 +7,7 @@
 **StagePro** is a cross-platform, musician-focused lyrics and chord prompter designed for **live performance**.  
 It is built around **ChordPro** song files, supports **foot-switch control**, and cleanly separates **on-stage use** from **setlist and library management**.
 
-StagePro is designed to run reliably on laptops, mini PCs, and stage wedges — even **offline at a gig**.
+StagePro is designed to run reliably on laptops, mini PCs, and dedicated **portrait-oriented stage wedges** — even **offline at a gig**.
 
 ---
 
@@ -16,14 +16,16 @@ StagePro is designed to run reliably on laptops, mini PCs, and stage wedges — 
 ![StagePro Maintenance View](assets/stagepro_maintenance_mode.png)
 ![StagePro Performance View](assets/stagepro_performance_mode.png)
 ![StagePro Preferences Window](assets/stagepro_preferences.png)
+
 ---
 
 ## ✨ Key Features
 
 ### 🎶 Performance-First Design
-- Dedicated **On-Stage Mode** (fullscreen, distraction-free)
+- Dedicated **On-Stage Mode** (true fullscreen, distraction-free)
 - **Maintenance Mode** for managing songs, playlists, and metadata
-- Optimized for **portrait or landscape** stage displays
+- Optimized for **portrait-first** stage displays
+- Reliable behavior on **rotated monitors**
 - Works fully **offline**
 
 ### 📄 ChordPro Native
@@ -37,6 +39,7 @@ StagePro is designed to run reliably on laptops, mini PCs, and stage wedges — 
 - Theme-based color system (JSON theme files)
 - Screen **rotation support** (90° / 180° / 270°)
 - Portrait & landscape orientation support
+- Correct word wrapping and pagination on rotated displays
 
 ### 🎨 Theme System
 - Theme files stored as JSON
@@ -78,6 +81,24 @@ Changes apply **immediately**.
 
 ---
 
+## 🆕 What’s New in v1.1.0
+
+### 🎯 Portrait-First Layout Improvements
+- Maintenance mode UI redesigned to work correctly on **rotated and portrait displays**
+- Window resizing and maximize behavior now works reliably across Linux desktop environments (including XFCE)
+- On-stage rendering now uses **logical layout dimensions**, fixing word wrapping on rotated monitors
+
+### 🪟 Cross-Platform Window Behavior Fixes
+- Proper separation between Maintenance and On-Stage sizing logic
+- No hidden fullscreen constraints affecting window resizing
+- Improved compatibility with mini PCs and dedicated stage displays
+
+### 📦 Smaller Windows Builds
+- Windows packaging optimized — dramatically reduced installer size
+- Only required Qt components are bundled
+
+---
+
 ## 💻 Supported Platforms
 
 StagePro is built and tested on:
@@ -116,8 +137,8 @@ Download the `.app` bundle or zip, extract, and launch.
 
 ### Clone & Run
 ```bash
-git clone https://github.com/<your-org>/stagepro.git
-cd stagepro
+git clone https://github.com/iampaulmata/StagePro.git
+cd StagePro
 python -m venv .venv
 source .venv/bin/activate   # or .venv\Scripts\activate on Windows
 pip install -r requirements.txt
