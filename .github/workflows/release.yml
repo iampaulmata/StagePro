@@ -4,6 +4,16 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to build (tag like v1.1.0, branch, or commit SHA). Leave blank to use default branch."
+        required: false
+        default: ""
+      version:
+        description: "Version string for artifact naming. Defaults to ref (if provided), else tag name (on tag push), else short SHA."
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -24,7 +34,27 @@ jobs:
             os: windows-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # If manually triggered, allow building a specific ref (tag/branch/sha)
+          ref: ${{ inputs.ref }}
+
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          elif [ -n "${{ inputs.ref }}" ]; then
+            echo "version=${{ inputs.ref }}" >> "$GITHUB_OUTPUT"
+          elif [ -n "${GITHUB_REF_NAME}" ]; then
+            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Resolved version: ${{ steps.ver.outputs.version }}"
 
       # ---------- Linux ----------
       - name: System deps (Linux)
@@ -48,7 +78,7 @@ jobs:
       - name: Build AppImage (Linux)
         if: matrix.platform == 'linux'
         env:
-          VERSION: ${{ github.ref_name }}
+          VERSION: ${{ steps.ver.outputs.version }}
         run: |
           chmod +x packaging/build_pyinstaller.sh packaging/build_appimage.sh
           cd "$GITHUB_WORKSPACE"
@@ -63,30 +93,34 @@ jobs:
             StagePro-*.AppImage.sha256
 
       # ---------- macOS ----------
-      - uses: actions/setup-python@v5
+      - name: Use system Python (macOS self-hosted)
         if: matrix.platform == 'macos'
-        with:
-          python-version: "3.12"
-          cache: "pip"
+        shell: bash
+        run: |
+          python3 --version
+          python3 -m pip --version
 
       - name: Install deps (macOS)
         if: matrix.platform == 'macos'
+        shell: bash
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -r requirements-build.txt
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r requirements.txt
+          python3 -m pip install -r requirements-build.txt
 
       - name: Build (PyInstaller) (macOS)
         if: matrix.platform == 'macos'
+        shell: bash
         run: |
           cd "$GITHUB_WORKSPACE"
           rm -rf build dist
-          pyinstaller packaging/stagepro.macos.spec --clean
+          python3 -m PyInstaller packaging/stagepro.macos.spec --clean
 
       - name: Zip .app (macOS)
         if: matrix.platform == 'macos'
+        shell: bash
         run: |
-          REF="${GITHUB_REF_NAME}"
+          REF="${{ steps.ver.outputs.version }}"
           ditto -c -k --sequesterRsrc --keepParent "dist/StagePro.app" "StagePro-${REF}-macos.zip"
 
       - uses: actions/upload-artifact@v4
@@ -122,13 +156,13 @@ jobs:
         shell: pwsh
         run: |
           Remove-Item -Recurse -Force build, dist -ErrorAction SilentlyContinue
-          pyinstaller packaging/stagepro.windows.spec --clean
+          pyinstaller packaging\stagepro.windows.spec --clean
 
       - name: Package portable zip (Windows)
         if: matrix.platform == 'windows'
         shell: pwsh
         run: |
-          $ver = "${{ github.ref_name }}"
+          $ver = "${{ steps.ver.outputs.version }}"
           Compress-Archive -Path "dist\StagePro\*" -DestinationPath "StagePro-$ver-windows-x64-portable.zip" -Force
 
       - uses: actions/upload-artifact@v4
@@ -141,6 +175,11 @@ jobs:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
     needs: [ build ]
+    # Only publish a GitHub Release when we have (or were given) a tag-like ref.
+    # - Tag push: github.ref is refs/tags/v*
+    # - Manual: require inputs.ref to start with v (e.g., v1.1.0)
+    if: startsWith(github.ref, 'refs/tags/v') || startsWith(inputs.ref, 'v')
+
     steps:
       - name: Download all release artifacts
         uses: actions/download-artifact@v4
@@ -156,6 +195,9 @@ jobs:
       - name: Publish release and attach files
         uses: softprops/action-gh-release@v2
         with:
+          # For manual runs, publish under the provided tag.
+          # For tag pushes, this is optional, but harmless.
+          tag_name: ${{ inputs.ref || github.ref_name }}
           files: |
             release/StagePro-*-macos.zip
             release/StagePro-*.AppImage

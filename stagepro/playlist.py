@@ -7,7 +7,7 @@ def list_song_files_alpha_from_roots(roots: Sequence[Path], cfg: dict) -> List[P
     setlist_name = (cfg.get("setlist", {}) or {}).get("filename", "setlist.txt").lower()
     files_by_name: dict[str, Path] = {}
     for root in roots:
-        if not root.exists():
+        if not root.exists() or not root.is_dir():
             continue
         for p in root.iterdir():
             if not p.is_file():
