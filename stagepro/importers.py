@@ -38,6 +38,15 @@ class ImportedSong:
     chordpro_text: str
 
 
+def normalize_song_file(src: Path) -> ImportedSong:
+    """Normalize a song file into canonical ChordPro text.
+
+    This reuses the same import/validation pipeline used for user imports so
+    .txt files and loosely formatted chordpro are handled consistently.
+    """
+    return import_user_file_to_chordpro(src)
+
+
 def looks_like_chordpro(text: str) -> bool:
     """Heuristic detection: directives or chord tokens."""
     for line in text.splitlines():

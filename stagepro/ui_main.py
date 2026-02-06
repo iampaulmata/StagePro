@@ -46,8 +46,9 @@ from .importers import (
 )
 from .musicbrainz import MusicBrainzClient, MBRecordingHit
 from .config import get_user_config_dir
-from .library_sources import load_libraries_config, parse_library_sources
 from .paths import overrides_dir
+from .libraries.model import load_libraries_config
+from .ui_libraries import LibrariesManagerDialog
 from .render import song_to_chunks
 from .paginate import paginate_to_fit
 
@@ -209,20 +210,7 @@ class StageProWindow(QMainWindow):
         self.songs_dir = Path(self.cfg["songs_path"])
         self.songs_dir.mkdir(parents=True, exist_ok=True)
 
-        self.libraries_cfg = load_libraries_config()
-        self.library_sources = parse_library_sources(self.libraries_cfg)
-        self.library_published_dirs = []
-        self.library_override_dirs = []
-        for source in self.library_sources:
-            if not source.enabled:
-                continue
-            pub_dir = source.published_dir()
-            self.library_published_dirs.append(pub_dir)
-            override_dir = source.overrides_dir()
-            override_dir.mkdir(parents=True, exist_ok=True)
-            self.library_override_dirs.append(override_dir)
-        if not self.library_override_dirs:
-            overrides_dir().mkdir(parents=True, exist_ok=True)
+        self._load_library_sources()
 
         # Playlists (multi-setlist)
         self.playlists = PlaylistStore(self.songs_dir, self.cfg)
@@ -561,6 +549,22 @@ class StageProWindow(QMainWindow):
 
         self.cmb_playlist.setCurrentIndex(active_index)
         self.cmb_playlist.blockSignals(False)
+
+    def _load_library_sources(self) -> None:
+        self.libraries_cfg = load_libraries_config()
+        self.library_sources = list(self.libraries_cfg.library_sources)
+        self.library_published_dirs = []
+        self.library_override_dirs = []
+        for source in self.library_sources:
+            if not source.enabled:
+                continue
+            pub_dir = source.published_dir()
+            self.library_published_dirs.append(pub_dir)
+            override_dir = source.overrides_dir()
+            override_dir.mkdir(parents=True, exist_ok=True)
+            self.library_override_dirs.append(override_dir)
+        if not self.library_override_dirs:
+            overrides_dir().mkdir(parents=True, exist_ok=True)
 
     def _song_roots(self) -> List[Path]:
         roots: List[Path] = []
@@ -1163,6 +1167,9 @@ class StageProWindow(QMainWindow):
         pref_act.setShortcut("Ctrl+,")
         pref_act.triggered.connect(self.open_preferences)
 
+        libraries_act = QAction("Libraries…", self)
+        libraries_act.triggered.connect(self.open_libraries_manager)
+
         quit_act = QAction("Quit", self)
         quit_act.setShortcut("Ctrl+Q")
         quit_act.triggered.connect(self.close)
@@ -1171,8 +1178,18 @@ class StageProWindow(QMainWindow):
 
         tools_menu = menu.addMenu("&Tools")
         tools_menu.addAction(pref_act)
+        tools_menu.addAction(libraries_act)
         tools_menu.addSeparator()
         tools_menu.addAction(quit_act)
+
+    def open_libraries_manager(self) -> None:
+        dialog = LibrariesManagerDialog(self, on_sync_complete=self._on_libraries_sync_complete)
+        dialog.exec()
+
+    def _on_libraries_sync_complete(self) -> None:
+        self._load_library_sources()
+        self._refresh_maintenance_list(preserve_selection=True)
+        self._load_first_song_or_welcome()
 
     # ---------- Song loading / rendering ----------
 
