@@ -30,8 +30,18 @@ def is_supported_song_path(path: Path) -> bool:
 def _matches_globs(rel_path: str, globs: list[str]) -> bool:
     if not globs:
         return True
-    return any(fnmatch.fnmatch(rel_path, pat) for pat in globs)
 
+    for pat in globs:
+        # Normal match
+        if fnmatch.fnmatch(rel_path, pat):
+            return True
+
+        # fnmatch does NOT treat ** specially; "**/*.ext" won't match "file.ext" at root.
+        # So if pattern starts with "**/", also try it without that prefix.
+        if pat.startswith("**/") and fnmatch.fnmatch(rel_path, pat[3:]):
+            return True
+
+    return False
 
 def scan_files(mirror_dir: Path, include_globs: list[str], exclude_globs: list[str]) -> list[Path]:
     files: list[Path] = []

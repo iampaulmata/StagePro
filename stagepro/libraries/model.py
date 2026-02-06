@@ -25,6 +25,11 @@ class LibrarySource:
     auth: Dict[str, Any] = field(default_factory=dict)
     local: Dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        # Ensure local directories are always populated, even when constructed directly.
+        if self.source_id:
+            self.local = _ensure_local_defaults(self.source_id, dict(self.local or {}))
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "LibrarySource":
         source_id = str(data.get("id") or "").strip()

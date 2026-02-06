@@ -7,19 +7,26 @@ from PySide6.QtCore import QStandardPaths
 
 from .config import APP_NAME
 
-
 def get_app_data_dir() -> Path:
     base = QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)
-    if base:
-        return Path(base)
-
     home = Path.home()
+
+    # Always normalize to lowercase app dir name on Linux:
+    # ~/.local/share/stagepro
+    if sys.platform.startswith("linux"):
+        return Path(os.environ.get("XDG_DATA_HOME", home / ".local" / "share")) / APP_NAME
+
+    # On macOS/Windows, Qt may return a fully qualified per-app folder.
+    # Still normalize the leaf name to APP_NAME (lowercase) to avoid "StagePro" vs "stagepro".
+    if base:
+        p = Path(base)
+        return p.parent / APP_NAME
+
     if os.name == "nt":
         return Path(os.environ.get("APPDATA", home / "AppData" / "Roaming")) / APP_NAME
     if sys.platform == "darwin":
         return home / "Library" / "Application Support" / APP_NAME
     return Path(os.environ.get("XDG_DATA_HOME", home / ".local" / "share")) / APP_NAME
-
 
 def ensure_dir(path: Path) -> Path:
     path.mkdir(parents=True, exist_ok=True)

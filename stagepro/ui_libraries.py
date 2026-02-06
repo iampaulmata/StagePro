@@ -40,6 +40,8 @@ class SyncWorker(QObject):
     def __init__(self, source_id: str) -> None:
         super().__init__()
         self.source_id = source_id
+        self._threads: dict[str, QThread] = {}
+        self._workers: dict[str, SyncWorker] = {}
 
     def run(self) -> None:
         def _progress(msg: str) -> None:
@@ -57,6 +59,7 @@ class LibrariesManagerDialog(QDialog):
         self.on_sync_complete = on_sync_complete
 
         self._threads: dict[str, QThread] = {}
+        self._workers: dict[str, SyncWorker] = {}
 
         layout = QVBoxLayout(self)
 
@@ -137,9 +140,11 @@ class LibrariesManagerDialog(QDialog):
         actions_layout.setContentsMargins(0, 0, 0, 0)
         sync_btn = QPushButton("Sync", actions)
         sync_btn.setEnabled(git_available)
-        sync_btn.clicked.connect(lambda: self._start_sync(source.source_id))
+        sync_btn.setProperty("source_id", source.source_id)
+        sync_btn.clicked.connect(self._on_sync_clicked)
         delete_btn = QPushButton("Delete", actions)
-        delete_btn.clicked.connect(lambda: self._delete_source(source.source_id))
+        delete_btn.setProperty("source_id", source.source_id)
+        delete_btn.clicked.connect(self._on_delete_clicked)
         actions_layout.addWidget(sync_btn)
         actions_layout.addWidget(delete_btn)
         self.table.setCellWidget(row, 7, actions)
@@ -155,6 +160,18 @@ class LibrariesManagerDialog(QDialog):
             return "0"
         except Exception:
             return "—"
+
+    def _on_sync_clicked(self) -> None:
+        button = self.sender()
+        source_id = button.property("source_id") if button else None
+        if source_id:
+            self._start_sync(str(source_id))
+
+    def _on_delete_clicked(self) -> None:
+        button = self.sender()
+        source_id = button.property("source_id") if button else None
+        if source_id:
+            self._delete_source(str(source_id))
 
     def _on_add_clicked(self) -> None:
         repo = self.repo_input.text().strip()
@@ -193,21 +210,29 @@ class LibrariesManagerDialog(QDialog):
     def _start_sync(self, source_id: str) -> None:
         if source_id in self._threads:
             return
+
         thread = QThread(self)
         worker = SyncWorker(source_id)
         worker.moveToThread(thread)
+
         thread.started.connect(worker.run)
         worker.progress.connect(self._on_progress)
         worker.finished.connect(self._on_sync_finished)
+
+        # IMPORTANT: ensure proper shutdown/cleanup order
         worker.finished.connect(thread.quit)
-        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
+
         self._threads[source_id] = thread
+        self._workers[source_id] = worker  # <-- keep a strong reference
+
         thread.start()
         self._set_status(source_id, "syncing")
         self.progress_label.setText("Syncing…")
         self.progress_bar.setRange(0, 0)
         self.progress_bar.setVisible(True)
+
 
     def _on_progress(self, source_id: str, message: str) -> None:
         self._set_status(source_id, message)
@@ -215,6 +240,7 @@ class LibrariesManagerDialog(QDialog):
 
     def _on_sync_finished(self, source_id: str, success: bool, message: str) -> None:
         self._threads.pop(source_id, None)
+        self._workers.pop(source_id, None)  # <-- release worker ref now that thread is quitting
         state = load_state(source_id)
         if not success:
             QMessageBox.warning(self, "Sync failed", message)

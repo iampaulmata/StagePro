@@ -48,7 +48,6 @@ from .musicbrainz import MusicBrainzClient, MBRecordingHit
 from .config import get_user_config_dir
 from .paths import overrides_dir
 from .libraries.model import load_libraries_config
-from .ui_libraries import LibrariesManagerDialog
 from .render import song_to_chunks
 from .paginate import paginate_to_fit
 
@@ -1183,8 +1182,18 @@ class StageProWindow(QMainWindow):
         tools_menu.addAction(quit_act)
 
     def open_libraries_manager(self) -> None:
-        dialog = LibrariesManagerDialog(self, on_sync_complete=self._on_libraries_sync_complete)
-        dialog.exec()
+        if getattr(self, "_libraries_dialog", None) is None:
+            from .ui_libraries import LibrariesManagerDialog
+            dialog = LibrariesManagerDialog(self, on_sync_complete=self._on_libraries_sync_complete)
+            dialog.setAttribute(Qt.WA_DeleteOnClose)
+            dialog.finished.connect(self._on_libraries_dialog_closed)
+            self._libraries_dialog = dialog
+        self._libraries_dialog.show()
+        self._libraries_dialog.raise_()
+        self._libraries_dialog.activateWindow()
+
+    def _on_libraries_dialog_closed(self) -> None:
+        self._libraries_dialog = None
 
     def _on_libraries_sync_complete(self) -> None:
         self._load_library_sources()

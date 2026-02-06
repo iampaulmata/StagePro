@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Tuple
 from PySide6.QtCore import QStandardPaths
 
-APP_NAME = "StagePro"
+APP_NAME = "stagepro"
 CONFIG_FILE_NAME = "stagepro_config.json"
 
 def _app_base_dir() -> Path:
