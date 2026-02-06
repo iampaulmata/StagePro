@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
 )
 
 from .config import load_or_create_config, resolve_songs_path
-from .playlist import order_songs, list_song_files_alpha
+from .playlist import list_song_files_alpha_from_roots
 from .playlists_store import PlaylistStore
 from .chordpro import Song, parse_chordpro
 from .chordpro_edit import upsert_directives
@@ -46,9 +46,10 @@ from .importers import (
 )
 from .musicbrainz import MusicBrainzClient, MBRecordingHit
 from .config import get_user_config_dir
+from .library_sources import load_libraries_config, parse_library_sources
+from .paths import overrides_dir
 from .render import song_to_chunks
 from .paginate import paginate_to_fit
-SONGS_DIR_NAME = "songs"
 
 def _load_theme_colors(base_dir: str, cfg: dict) -> dict:
     """
@@ -207,6 +208,21 @@ class StageProWindow(QMainWindow):
 
         self.songs_dir = Path(self.cfg["songs_path"])
         self.songs_dir.mkdir(parents=True, exist_ok=True)
+
+        self.libraries_cfg = load_libraries_config()
+        self.library_sources = parse_library_sources(self.libraries_cfg)
+        self.library_published_dirs = []
+        self.library_override_dirs = []
+        for source in self.library_sources:
+            if not source.enabled:
+                continue
+            pub_dir = source.published_dir()
+            self.library_published_dirs.append(pub_dir)
+            override_dir = source.overrides_dir()
+            override_dir.mkdir(parents=True, exist_ok=True)
+            self.library_override_dirs.append(override_dir)
+        if not self.library_override_dirs:
+            overrides_dir().mkdir(parents=True, exist_ok=True)
 
         # Playlists (multi-setlist)
         self.playlists = PlaylistStore(self.songs_dir, self.cfg)
@@ -546,6 +562,23 @@ class StageProWindow(QMainWindow):
         self.cmb_playlist.setCurrentIndex(active_index)
         self.cmb_playlist.blockSignals(False)
 
+    def _song_roots(self) -> List[Path]:
+        roots: List[Path] = []
+        if self.library_override_dirs:
+            roots.extend(self.library_override_dirs)
+        else:
+            roots.append(overrides_dir())
+        roots.append(self.songs_dir)
+        roots.extend(self.library_published_dirs)
+        return roots
+
+    def _resolve_song_path(self, name: str) -> Optional[Path]:
+        for root in self._song_roots():
+            candidate = root / name
+            if candidate.exists() and candidate.is_file():
+                return candidate
+        return None
+
     def _refresh_maintenance_list(self, preserve_selection: bool = False) -> None:
         """Refresh Maintenance Mode playlist + library lists."""
         self._refresh_playlist_selector()
@@ -566,7 +599,7 @@ class StageProWindow(QMainWindow):
 
 
         # Prune stale playlist entries that no longer exist on disk
-        missing_idxs = [i for i, name in enumerate(playlist_names) if not (self.songs_dir / name).exists()]
+        missing_idxs = [i for i, name in enumerate(playlist_names) if not self._resolve_song_path(name)]
         if missing_idxs:
             try:
                 self.playlists.remove_items_by_index(pl.playlist_id, missing_idxs)
@@ -575,8 +608,8 @@ class StageProWindow(QMainWindow):
             pl = self.playlists.get_active()
             playlist_names = list(pl.items)
 
-        # Library: all files in songs_dir (alpha)
-        lib_paths = list_song_files_alpha(self.songs_dir, self.cfg)
+        # Library: merged roots (overrides, user songs, published sources)
+        lib_paths = list_song_files_alpha_from_roots(self._song_roots(), self.cfg)
         lib_names = [p.name for p in lib_paths]
 
         # Search filters the library only (keeps playlist operations predictable)
@@ -587,7 +620,7 @@ class StageProWindow(QMainWindow):
         # Populate playlist list (playlist-only)
         self.maint_playlist_list.clear()
         for name in playlist_names:
-            p = self.songs_dir / name
+            p = self._resolve_song_path(name) or (self.songs_dir / name)
             it = QListWidgetItem(name)
             it.setData(Qt.UserRole, str(p))
             self.maint_playlist_list.addItem(it)
@@ -596,7 +629,7 @@ class StageProWindow(QMainWindow):
         playlist_set = {n.lower() for n in playlist_names}
         self.maint_library_list.clear()
         for name in lib_names:
-            p = self.songs_dir / name
+            p = next((lp for lp in lib_paths if lp.name == name), self.songs_dir / name)
             it = QListWidgetItem(name)
             it.setData(Qt.UserRole, str(p))
             if name.lower() in playlist_set:
@@ -1151,7 +1184,7 @@ class StageProWindow(QMainWindow):
         return (
             f"<html><body style='background:{bg};color:{fg};"
             f"font-family:sans-serif;padding:24px;'>"
-            f"<h1>StagePro</h1><p>No songs found in ./songs</p>"
+            f"<h1>StagePro</h1><p>No songs found in your libraries</p>"
             f"</body></html>"
         )
 
@@ -1162,7 +1195,9 @@ class StageProWindow(QMainWindow):
         items = list(pl.items or [])
 
         # Map filenames -> actual Paths (skip missing)
-        existing = {p.name.lower(): p for p in list_song_files_alpha(self.songs_dir, self.cfg)}
+        existing = {
+            p.name.lower(): p for p in list_song_files_alpha_from_roots(self._song_roots(), self.cfg)
+        }
 
         ordered = []
         for name in items:
