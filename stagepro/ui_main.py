@@ -4,8 +4,24 @@ import json
 import re
 from typing import List, Optional, Tuple
 
-from PySide6.QtCore import Qt, QEvent, QTimer, QRectF, QSize
-from PySide6.QtGui import QAction, QKeySequence, QFont
+from PySide6.QtCore import (
+    Qt,
+    QEvent,
+    QTimer,
+    QRectF,
+    QSize,
+    QRect,
+)
+
+from PySide6.QtGui import (
+    QAction, QKeySequence,
+    QFont,
+    QShortcut,
+    QGuiApplication,
+    QCursor,
+    QTextCursor,
+)
+
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -32,6 +48,7 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QLineEdit,
     QSizePolicy,
+    QTextEdit,
 )
 
 from .config import load_or_create_config, resolve_songs_path
@@ -270,6 +287,7 @@ class StageProWindow(QMainWindow):
 
         self.btn_import = QPushButton("Import Songs…")
         self.btn_save_setlist = QPushButton("Save Setlist")
+        self.btn_edit_song = QPushButton("Edit…")
         self.btn_move_up = QPushButton("▲")
         self.btn_move_down = QPushButton("▼")
         self.btn_mb_autofill = QPushButton("Autofill from MusicBrainz…")
@@ -496,6 +514,9 @@ class StageProWindow(QMainWindow):
         row2.addWidget(self.btn_move_up)
         row2.addWidget(self.btn_move_down)
         row2.addWidget(self.btn_add_to_set)
+        row2.addSpacing(12)
+        row2.addWidget(self.btn_edit_song)
+
         row2.addWidget(self.btn_remove_from_set)
         row2.addStretch(1)
         row2.addWidget(self.btn_save_setlist)  # export-to-setlist.txt (legacy compatibility)
@@ -514,6 +535,7 @@ class StageProWindow(QMainWindow):
         self.maint_playlist_list.itemSelectionChanged.connect(self._on_maint_selection_changed)
         self.maint_library_list.itemSelectionChanged.connect(self._on_maint_selection_changed)
         self.maint_library_list.itemDoubleClicked.connect(lambda _: self._add_selected_library_to_playlist())
+        self.btn_edit_song.clicked.connect(self._on_edit_song_clicked)
         self.search_box.textChanged.connect(lambda _: self._refresh_maintenance_list(preserve_selection=True))
         self.btn_import.clicked.connect(self._on_import_clicked)
         self.btn_save_setlist.clicked.connect(self._save_setlist_from_ui)
@@ -530,6 +552,7 @@ class StageProWindow(QMainWindow):
         self.btn_remove_from_set.clicked.connect(self._remove_selected_from_playlist)
 
         # Tooltips for clarity
+        self.btn_edit_song.setToolTip("Edit the selected song (library songs will be copied locally first)")
         self.btn_mb_autofill.setToolTip("Search MusicBrainz to fill missing metadata for the selected song")
         self.btn_add_to_set.setToolTip("Add selected Library song to the current playlist (does not copy files)")
         self.btn_remove_from_set.setToolTip("Remove selected song from the current playlist (does not delete the file)")
@@ -766,6 +789,299 @@ class StageProWindow(QMainWindow):
         except Exception as e:
             self.maint_preview.setPlainText(text)
             self.maint_status.setText(f"Selected: {path.name} (parse error: {e})")
+
+        # ---------- Local editing in Maintenance ----------
+
+    def _read_song_text_for_edit(self, path: Path) -> str:
+        """Read song text using UTF-8, falling back to latin-1 if needed."""
+        try:
+            return path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            return path.read_text(encoding="latin-1")
+
+    def _is_under_dir(self, path: Path, root: Path) -> bool:
+        try:
+            path.resolve().relative_to(root.resolve())
+            return True
+        except Exception:
+            return False
+
+    def _library_published_root_for(self, path: Path) -> Optional[Path]:
+        """Return the published root dir (published/<source_id>) that contains path."""
+        for pub in (self.library_published_dirs or []):
+            if self._is_under_dir(path, pub):
+                return pub
+        return None
+
+    def _make_unique_local_name(self, preferred_name: str) -> str:
+        """Make a unique filename in songs_dir root."""
+        preferred = Path(preferred_name).name
+        stem = Path(preferred).stem
+        ext = "".join(Path(preferred).suffixes) or ""
+        cand = self.songs_dir / (stem + ext)
+        if not cand.exists():
+            return cand.name
+
+        for i in range(1, 10_000):
+            cand = self.songs_dir / f"{stem} ({i}){ext}"
+            if not cand.exists():
+                return cand.name
+        raise RuntimeError("Could not generate a unique filename for local copy")
+
+    def _on_edit_song_clicked(self) -> None:
+        # Enable local editing from Maintenance mode.
+        if getattr(self, "mode", None) != "maintenance":
+            return
+
+        path = self._selected_path_for_preview()
+        if not path:
+            QMessageBox.information(self, "Edit Song", "Select a song first.")
+            return
+        if not path.exists():
+            QMessageBox.warning(self, "Edit Song", f"Song file not found:\n{path}")
+            return
+
+        try:
+            text = self._read_song_text_for_edit(path)
+        except Exception as e:
+            QMessageBox.critical(self, "Edit Song", f"Failed to read file:\n{path}\n\n{e}")
+            return
+
+        published_root = self._library_published_root_for(path)
+        is_user_song = self._is_under_dir(path, self.songs_dir)
+
+        # Rule (compatible with today's playlist model, which stores filenames only):
+        # - User songs: edit in place
+        # - Published library songs: save as a LOCAL copy in songs_dir root (library version unchanged)
+        if published_root and not is_user_song:
+            source_id = published_root.name  # published/<source_id>/...
+            msg = (
+                "This song comes from a synced Library.\n\n"
+                "Edits are saved as a LOCAL copy in your Songs folder "
+                "(the library version is not modified).\n\n"
+                f"Library source: {source_id}\n"
+                f"File: {path.name}\n\n"
+                "Continue?"
+            )
+            if QMessageBox.question(self, "Edit Library Song", msg, QMessageBox.Yes | QMessageBox.No) != QMessageBox.Yes:
+                return
+
+            local_name = self._make_unique_local_name(path.name)
+            edit_target = self.songs_dir / local_name
+        else:
+            edit_target = path
+
+        dlg = self._song_editor_dialog(
+            title=f"Edit: {edit_target.name}",
+            initial_text=text,
+            info_path=edit_target,
+            is_copy=(edit_target != path),
+        )
+        if dlg.exec() != QDialog.Accepted:
+            return
+
+        new_text = dlg._editor.toPlainText()
+
+        try:
+            edit_target.parent.mkdir(parents=True, exist_ok=True)
+            edit_target.write_text(new_text, encoding="utf-8")
+        except Exception as e:
+            QMessageBox.critical(self, "Edit Song", f"Failed to save:\n{edit_target}\n\n{e}")
+            return
+
+        # If we created a local copy while a playlist item is selected, swap that playlist row to the new local filename.
+        if edit_target != path and self.maint_playlist_list.selectedItems():
+            row = self.maint_playlist_list.currentRow()
+            if row >= 0:
+                pid = self.playlists.active_playlist_id
+                if pid:
+                    pl = self.playlists.get_active()
+                    items = list(pl.items or [])
+                    if 0 <= row < len(items):
+                        items[row] = edit_target.name
+                        self.playlists.set_items(pid, items)
+
+        self.maint_status.setText(f"Saved: {edit_target.name}")
+        self._refresh_maintenance_list(preserve_selection=False)
+        self._preview_song_in_maintenance(edit_target)
+
+    def _song_editor_dialog(self, title: str, initial_text: str, info_path: Path, is_copy: bool) -> QDialog:
+        dlg = QDialog(self)
+        dlg.setWindowTitle(title)
+        dlg.setModal(True)
+
+        # --- Tag buttons row --------------------------------------------------------
+        tag_row = QHBoxLayout()
+        tag_row.setContentsMargins(0, 0, 0, 0)
+
+        def _btn(label: str, on_click):
+            b = QPushButton(label, dlg)
+            b.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+            b.clicked.connect(on_click)
+            return b
+
+        # Title / Artist
+        tag_row.addWidget(_btn("Title", lambda: (_ensure_header_top(),
+            _insert_text("{title: TITLE}\n", "TITLE"))))
+
+        # In ChordPro, "artist" is commonly stored in {subtitle: ...}
+        tag_row.addWidget(_btn("Artist", lambda: (_ensure_header_top(),
+            _insert_text("{subtitle: ARTIST}\n", "ARTIST"))))
+
+        # Tempo / Key
+        tag_row.addWidget(_btn("Tempo", lambda: (_ensure_header_top(),
+            _insert_text("{tempo: 120}\n", "120"))))
+
+        tag_row.addWidget(_btn("Key", lambda: (_ensure_header_top(),
+            _insert_text("{key: Am}\n", "Am"))))
+
+        # Notes (comment meta)
+        tag_row.addWidget(_btn("Notes", lambda: _insert_text("{comment: NOTES}\n", "NOTES")))
+
+        # Chords helper (inserts a starter chord line; user can edit)
+        tag_row.addWidget(_btn("Chords line", lambda: _insert_text("[Am] [F] [C] [G]\n")))
+
+        # Section blocks (wrap selection if selected)
+        tag_row.addWidget(_btn("Verse", lambda: _insert_text(
+            "{start_of_verse}\n{sel}\n{end_of_verse}\n\n" if editor.textCursor().hasSelection()
+            else "{start_of_verse}\nLYRICS...\n{end_of_verse}\n\n",
+            "LYRICS..."
+        )))
+
+        tag_row.addWidget(_btn("Chorus", lambda: _insert_text(
+            "{start_of_chorus}\n{sel}\n{end_of_chorus}\n\n" if editor.textCursor().hasSelection()
+            else "{start_of_chorus}\nLYRICS...\n{end_of_chorus}\n\n",
+            "LYRICS..."
+        )))
+
+        tag_row.addWidget(_btn("Bridge", lambda: _insert_text(
+            "{start_of_bridge}\n{sel}\n{end_of_bridge}\n\n" if editor.textCursor().hasSelection()
+            else "{start_of_bridge}\nLYRICS...\n{end_of_bridge}\n\n",
+            "LYRICS..."
+        )))
+
+        tag_row.addStretch(1)
+
+        # Determine which screen the dialog should appear on
+        screen = QGuiApplication.screenAt(QCursor.pos())
+        if screen is None:
+            screen = QGuiApplication.primaryScreen()
+
+        screen_geom = screen.availableGeometry()
+
+        # Calculate desired size
+        width = int(screen_geom.width() * 0.50)
+        height = int(screen_geom.height() * 0.75)
+
+        # Center the dialog on that screen
+        x = screen_geom.x() + (screen_geom.width() - width) // 2
+        y = screen_geom.y() + (screen_geom.height() - height) // 2
+
+        dlg.setGeometry(QRect(x, y, width, height))
+
+
+        # Remember focus so we can restore it after closing.
+        prev_focus = QApplication.focusWidget()
+
+        layout = QVBoxLayout(dlg)
+
+        info = QLabel(dlg)
+        if is_copy:
+            info.setText(
+                "Editing a local copy.\n"
+                f"Save target: {info_path}\n\n"
+                "Tip: your library copy stays unchanged."
+            )
+        else:
+            info.setText(f"Save target: {info_path}")
+        info.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        layout.addWidget(info)
+
+        editor = QTextEdit(dlg)
+        editor.setPlainText(initial_text)
+        editor.setLineWrapMode(QTextEdit.NoWrap)
+        editor.setFocusPolicy(Qt.StrongFocus)        
+        layout.addLayout(tag_row)
+        layout.addWidget(editor, 1)
+
+        def _insert_text(snippet: str, select_placeholder: str | None = None) -> None:
+            cur = editor.textCursor()
+
+            # If user has selected text and the snippet contains "{sel}", wrap it.
+            if cur.hasSelection() and "{sel}" in snippet:
+                selected = cur.selectedText()
+                # selectedText() uses U+2029 for line breaks; normalize back to \n
+                selected = selected.replace("\u2029", "\n")
+                snippet_to_insert = snippet.replace("{sel}", selected)
+            else:
+                snippet_to_insert = snippet
+
+            cur.beginEditBlock()
+            cur.insertText(snippet_to_insert)
+            cur.endEditBlock()
+
+            # Optionally select a placeholder so user can type immediately
+            if select_placeholder:
+                doc = editor.document()
+                full = doc.toPlainText()
+                start = full.rfind(select_placeholder)
+                if start != -1:
+                    cur = editor.textCursor()
+                    cur.setPosition(start)
+                    cur.setPosition(start + len(select_placeholder), QTextCursor.KeepAnchor)
+                    editor.setTextCursor(cur)
+
+            editor.setFocus(Qt.OtherFocusReason)
+
+        def _ensure_header_top() -> None:
+            """If cursor isn't at top, jump to top before inserting title/artist metadata."""
+            cur = editor.textCursor()
+            if cur.position() != 0:
+                cur.setPosition(0)
+                editor.setTextCursor(cur)
+
+
+
+        # layout.addLayout(tag_row)
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel, parent=dlg)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        layout.addWidget(buttons)
+
+        # Make tab order predictable: editor -> Save -> Cancel -> editor
+        save_btn = buttons.button(QDialogButtonBox.Save)
+        cancel_btn = buttons.button(QDialogButtonBox.Cancel)
+        if save_btn and cancel_btn:
+            dlg.setTabOrder(editor, save_btn)
+            dlg.setTabOrder(save_btn, cancel_btn)
+            dlg.setTabOrder(cancel_btn, editor)
+
+        # Dialog-local shortcuts only
+        # Ctrl+S saves (accepts dialog)
+        if save_btn:
+            save_btn.setDefault(False)   # don’t steal Enter
+            save_btn.setAutoDefault(False)
+            save_sc = QShortcut(QKeySequence.Save, dlg)
+            save_sc.setContext(Qt.WidgetWithChildrenShortcut)
+            save_sc.activated.connect(dlg.accept)
+
+        # Esc cancels (rejects dialog) — QDialog usually does this already, but make it explicit.
+        esc_sc = QShortcut(QKeySequence.Cancel, dlg)
+        esc_sc.setContext(Qt.WidgetWithChildrenShortcut)
+        esc_sc.activated.connect(dlg.reject)
+
+        # Focus editor reliably after show (important on some platforms/window managers)
+        dlg.setFocusProxy(editor)
+        QTimer.singleShot(0, editor.setFocus)
+
+        # Restore prior focus when done
+        def _restore_focus(_result: int):
+            if prev_focus is not None:
+                QTimer.singleShot(0, lambda: prev_focus.setFocus(Qt.OtherFocusReason))
+        dlg.finished.connect(_restore_focus)
+
+        dlg._editor = editor
+        return dlg
 
     def _move_selected_item(self, delta: int) -> None:
         row = self.maint_playlist_list.currentRow()
@@ -1089,6 +1405,9 @@ class StageProWindow(QMainWindow):
         return False
 
     def eventFilter(self, obj, event):
+        modal = QApplication.activeModalWidget()
+        if modal is not None:
+            return False
         if event.type() == QEvent.KeyPress and not event.isAutoRepeat():
             k = event.key()
 
