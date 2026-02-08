@@ -1,21 +1,30 @@
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Sequence
 
 SUPPORTED_EXTS = {".cho", ".pro", ".chopro", ".txt"}
 
-def list_song_files_alpha(songs_dir: Path, cfg: dict) -> List[Path]:
+def list_song_files_alpha_from_roots(roots: Sequence[Path], cfg: dict) -> List[Path]:
     setlist_name = (cfg.get("setlist", {}) or {}).get("filename", "setlist.txt").lower()
-    files: List[Path] = []
-    for p in songs_dir.iterdir():
-        if not p.is_file():
+    files_by_name: dict[str, Path] = {}
+    for root in roots:
+        if not root.exists() or not root.is_dir():
             continue
-        if p.suffix.lower() not in SUPPORTED_EXTS:
-            continue
-        if p.name.lower() == setlist_name:   # ignore setlist file as a song
-            continue
-        files.append(p)
-    files.sort(key=lambda x: x.name.lower())
+        for p in root.iterdir():
+            if not p.is_file():
+                continue
+            if p.suffix.lower() not in SUPPORTED_EXTS:
+                continue
+            if p.name.lower() == setlist_name:  # ignore setlist file as a song
+                continue
+            key = p.name.lower()
+            if key not in files_by_name:
+                files_by_name[key] = p
+    files = sorted(files_by_name.values(), key=lambda x: x.name.lower())
     return files
+
+
+def list_song_files_alpha(songs_dir: Path, cfg: dict) -> List[Path]:
+    return list_song_files_alpha_from_roots([songs_dir], cfg)
 
 def read_setlist(songs_dir: Path, setlist_filename: str) -> Optional[List[str]]:
     p = songs_dir / setlist_filename
