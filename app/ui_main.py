@@ -33,14 +33,12 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPushButton,
-    QFileDialog,
     QLabel,
     QDialog,
     QDialogButtonBox,
     QGraphicsScene,
     QGraphicsView,
     QComboBox,
-    QInputDialog,
     QLineEdit,
     QSizePolicy,
     QTextEdit,
@@ -60,8 +58,6 @@ from .musicbrainz import MusicBrainzClient, MBRecordingHit
 from .config import get_user_config_dir
 from .paths import overrides_dir
 from .libraries.model import load_libraries_config
-from .render import song_to_chunks
-from .paginate import paginate_to_fit
 from .ui_preferences import PreferencesDialog, _load_theme_colors
 from .ui_song_utils import (
     read_song_text_for_edit,
@@ -85,6 +81,32 @@ from .ui_rendering import (
     resize_viewer_to_viewport,
     fit_view_to_content,
     apply_orientation_transform,
+)
+from .ui_playback import (
+    available_doc_size,
+    repaginate_and_render,
+    render_page,
+    next_page as playback_next_page,
+    prev_page as playback_prev_page,
+    next_song as playback_next_song,
+    prev_song as playback_prev_song,
+)
+from .ui_playlist_ops import (
+    move_selected_item,
+    persist_current_playlist_order,
+    add_filename_to_active_playlist,
+    add_selected_library_to_playlist,
+    remove_selected_from_playlist,
+    on_playlist_changed,
+    pl_new,
+    pl_rename,
+    pl_duplicate,
+    pl_delete,
+    save_setlist_from_ui,
+)
+from .ui_imports import (
+    on_import_clicked,
+    on_mb_autofill_clicked,
 )
 
 class StageProWindow(QMainWindow):
@@ -726,241 +748,87 @@ class StageProWindow(QMainWindow):
         )
 
     def _move_selected_item(self, delta: int) -> None:
-        row = self.maint_playlist_list.currentRow()
-        if row < 0:
-            return
-        new_row = row + int(delta)
-        if new_row < 0 or new_row >= self.maint_playlist_list.count():
-            return
-        it = self.maint_playlist_list.takeItem(row)
-        self.maint_playlist_list.insertItem(new_row, it)
-        self.maint_playlist_list.setCurrentRow(new_row)
-        self._persist_current_playlist_order()
+        move_selected_item(self.maint_playlist_list, delta, self._persist_current_playlist_order)
 
     def _persist_current_playlist_order(self) -> None:
-        pid = self.playlists.active_playlist_id
-        if not pid:
-            return
-        items = []
-        for i in range(self.maint_playlist_list.count()):
-            it = self.maint_playlist_list.item(i)
-            items.append(Path(it.data(Qt.UserRole)).name)
-        self.playlists.set_items(pid, items)
+        persist_current_playlist_order(self.maint_playlist_list, self.playlists.active_playlist_id, self.playlists.set_items)
 
     def _add_selected_library_to_playlist(self) -> None:
-        item = self.maint_library_list.currentItem()
-        if not item:
-            return
-        filename = Path(item.data(Qt.UserRole)).name
-        self._add_filename_to_active_playlist(filename)
-        self._refresh_maintenance_list(preserve_selection=False)
+        add_selected_library_to_playlist(
+            self.maint_library_list,
+            self._add_filename_to_active_playlist,
+            self._refresh_maintenance_list,
+        )
 
     def _add_filename_to_active_playlist(self, filename: str) -> None:
-        pl = self.playlists.get_active()
-        items = list(pl.items)
-        if filename.lower() in {x.lower() for x in items}:
-            return
-        items.append(filename)
-        self.playlists.set_items(pl.playlist_id, items)
+        add_filename_to_active_playlist(filename, self.playlists.get_active, self.playlists.set_items)
 
     def _remove_selected_from_playlist(self) -> None:
-        pid = self.playlists.active_playlist_id
-        if not pid:
-            return
-        row = self.maint_playlist_list.currentRow()
-        if row < 0:
-            return
-
-        self.playlists.remove_items_by_index(pid, [row])
-        self._refresh_maintenance_list(preserve_selection=False)
-        self._load_first_song_or_welcome()
+        remove_selected_from_playlist(
+            self.playlists.active_playlist_id,
+            self.maint_playlist_list,
+            self.playlists.remove_items_by_index,
+            self._refresh_maintenance_list,
+            self._load_first_song_or_welcome,
+        )
 
     def _on_playlist_changed(self, idx: int) -> None:
-        pid = self.cmb_playlist.currentData()
-        if not pid:
-            return
-        self.playlists.set_active(pid)
-        self._refresh_maintenance_list(preserve_selection=False)
-        self._load_first_song_or_welcome()
+        on_playlist_changed(
+            self.cmb_playlist,
+            self.playlists.set_active,
+            self._refresh_maintenance_list,
+            self._load_first_song_or_welcome,
+        )
 
     def _pl_new(self) -> None:
-        name, ok = QInputDialog.getText(self, "New Playlist", "Playlist name:")
-        if not ok:
-            return
-        self.playlists.create_playlist(name=name.strip() or "New Playlist", items=[])
-        self._refresh_maintenance_list(preserve_selection=False)
+        pl_new(self, self.playlists.create_playlist, self._refresh_maintenance_list)
 
     def _pl_rename(self) -> None:
-        pl = self.playlists.get_active()
-        name, ok = QInputDialog.getText(self, "Rename Playlist", "New name:", text=pl.name)
-        if not ok:
-            return
-        self.playlists.rename_playlist(pl.playlist_id, name.strip() or pl.name)
-        self._refresh_maintenance_list(preserve_selection=True)
+        pl_rename(self, self.playlists.get_active, self.playlists.rename_playlist, self._refresh_maintenance_list)
 
     def _pl_duplicate(self) -> None:
-        pl = self.playlists.get_active()
-        self.playlists.duplicate_playlist(pl.playlist_id)
-        self._refresh_maintenance_list(preserve_selection=False)
+        pl_duplicate(self.playlists.get_active, self.playlists.duplicate_playlist, self._refresh_maintenance_list)
 
     def _pl_delete(self) -> None:
-        pl = self.playlists.get_active()
-        resp = QMessageBox.question(
+        pl_delete(
             self,
-            "Delete Playlist",
-            f"Delete playlist '{pl.name}'?\n\nThis will NOT delete any song files.",
-            QMessageBox.Yes | QMessageBox.No,
+            self.playlists.get_active,
+            self.playlists.delete_playlist,
+            self._refresh_maintenance_list,
+            self._load_first_song_or_welcome,
         )
-        if resp != QMessageBox.Yes:
-            return
-        self.playlists.delete_playlist(pl.playlist_id)
-        self._refresh_maintenance_list(preserve_selection=False)
-        self._load_first_song_or_welcome()
 
 
     def _save_setlist_from_ui(self) -> None:
-        setlist_name = (self.cfg.get("setlist", {}) or {}).get("filename", "setlist.txt")
-        lines = []
-        for i in range(self.maint_playlist_list.count()):
-            it = self.maint_playlist_list.item(i)
-            # store filenames (not absolute paths)
-            lines.append(Path(it.data(Qt.UserRole)).name)
-        p = self.songs_dir / setlist_name
-        p.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
-        self.maint_status.setText(f"Saved setlist: {p}")
-        self._refresh_song_list()
+        save_setlist_from_ui(
+            self.cfg,
+            self.maint_playlist_list,
+            self.songs_dir,
+            self.maint_status,
+            self._refresh_song_list,
+        )
 
     def _on_import_clicked(self) -> None:
-        files, _ = QFileDialog.getOpenFileNames(
-            self,
-            "Import songs",
-            str(self.songs_dir),
-            "Songs (*.pro *.cho *.chopro *.txt);;All files (*)",
+        on_import_clicked(
+            parent=self,
+            songs_dir=self.songs_dir,
+            add_filename_to_active_playlist_callback=self._add_filename_to_active_playlist,
+            refresh_maintenance_list_callback=self._refresh_maintenance_list,
+            import_user_file_to_chordpro=import_user_file_to_chordpro,
+            choose_destination_path=choose_destination_path,
+            import_error_type=ImportErrorWithHint,
         )
-        if not files:
-            return
-
-        imported = 0
-        warnings: List[str] = []
-        for fp in files:
-            src = Path(fp)
-
-            # If the selected file is already in the songs folder, do NOT import/copy it.
-            # Just add it to the active playlist.
-            try:
-                if src.resolve().parent == self.songs_dir.resolve():
-                    if src.exists() and src.is_file():
-                        self._add_filename_to_active_playlist(src.name)
-                        imported += 1
-                        continue
-            except Exception:
-                pass
-
-            try:
-
-                imp = import_user_file_to_chordpro(src)
-                # choose dest
-                title = imp.title or src.stem
-                artist = imp.artist or "Unknown"
-                dest = choose_destination_path(self.songs_dir, title, artist, ext=".pro")
-                dest.write_text(imp.chordpro_text, encoding="utf-8")
-                imported += 1
-                # add to active playlist (at end)
-                self._add_filename_to_active_playlist(dest.name)
-
-                if not imp.title or not imp.artist:
-                    warnings.append(f"{src.name}: imported, but title/artist missing in directives (you can autofill from MusicBrainz)")
-            except ImportErrorWithHint as e:
-                warnings.append(f"{src.name}: {e}")
-            except Exception as e:
-                warnings.append(f"{src.name}: import failed ({e})")
-
-        self._refresh_maintenance_list(preserve_selection=False)
-        msg = f"Imported {imported} file(s)."
-        if warnings:
-            msg += "\n\n" + "\n".join(warnings[:12])
-            if len(warnings) > 12:
-                msg += f"\n…and {len(warnings) - 12} more."
-        QMessageBox.information(self, "Import", msg)
 
     def _on_mb_autofill_clicked(self) -> None:
-        path = self._selected_path_for_preview()
-        if not path:
-            QMessageBox.information(self, "MusicBrainz", "Select a song first.")
-            return
-        try:
-            text = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            text = path.read_text(encoding="latin-1")
-
-        # Extract title/artist from existing directives if present.
-        title = ""
-        artist = ""
-        for raw in text.splitlines():
-            m = re.match(r"^\s*\{\s*([^}:]+)\s*:\s*([^}]*)\}\s*$", raw, flags=re.IGNORECASE)
-            if not m:
-                continue
-            k = m.group(1).strip().lower()
-            v = m.group(2).strip()
-            if k in {"title", "t"} and not title:
-                title = v
-            if k in {"artist", "a"} and not artist:
-                artist = v
-
-        if not title or not artist:
-            QMessageBox.information(
-                self,
-                "MusicBrainz",
-                "This file is missing a title and/or artist directive.\n\n"
-                "StagePro can search MusicBrainz only when it knows the song title and artist.\n"
-                "Add {title: ...} and {artist: ...} (or re-import using the fallback header format).",
-            )
-            return
-
-        try:
-            hits = self.mb.search_recordings(title=title, artist=artist, limit=12)
-        except Exception as e:
-            QMessageBox.critical(self, "MusicBrainz", f"Search failed: {e}")
-            return
-
-        if not hits:
-            QMessageBox.information(self, "MusicBrainz", "No matches found.")
-            return
-
-        chosen = self._pick_musicbrainz_hit(hits)
-        if not chosen:
-            return
-
-        updates = {}
-        # Fill missing basics (do not overwrite user-specified values)
-        updates.setdefault("title", chosen.title)
-        updates.setdefault("artist", chosen.artist)
-        if chosen.release:
-            updates.setdefault("album", chosen.release)
-        if chosen.date:
-            updates.setdefault("year", chosen.date.split("-")[0])
-
-        # Only apply updates for keys that are currently missing
-        current_meta = {}
-        for raw in text.splitlines():
-            m = re.match(r"^\s*\{\s*([^}:]+)\s*:\s*([^}]*)\}\s*$", raw, flags=re.IGNORECASE)
-            if m:
-                current_meta[m.group(1).strip().lower()] = m.group(2).strip()
-
-        filtered_updates = {k: v for k, v in updates.items() if not current_meta.get(k)}
-        if not filtered_updates:
-            QMessageBox.information(self, "MusicBrainz", "Nothing to autofill — metadata is already present.")
-            return
-
-        new_text, _ = upsert_directives(text, filtered_updates)
-        try:
-            path.write_text(new_text, encoding="utf-8")
-        except Exception as e:
-            QMessageBox.critical(self, "MusicBrainz", f"Failed to save updates: {e}")
-            return
-
-        self.maint_status.setText(f"Autofilled metadata from MusicBrainz for: {path.name}")
-        self._preview_song_in_maintenance(path)
+        on_mb_autofill_clicked(
+            parent=self,
+            selected_path_for_preview_callback=self._selected_path_for_preview,
+            mb_client=self.mb,
+            pick_musicbrainz_hit_callback=self._pick_musicbrainz_hit,
+            upsert_directives=upsert_directives,
+            maint_status=self.maint_status,
+            preview_song_in_maintenance_callback=self._preview_song_in_maintenance,
+        )
 
     def _pick_musicbrainz_hit(self, hits: List[MBRecordingHit]) -> Optional[MBRecordingHit]:
         dlg = QDialog(self)
@@ -1200,78 +1068,61 @@ class StageProWindow(QMainWindow):
             QMessageBox.critical(self, "StagePro Error", f"Failed to open/parse:\n{path}\n\n{e}")
 
     def _available_doc_size(self) -> tuple[int, int]:
-        # The QTextBrowser is explicitly sized to the viewport (swapped in portrait), so use that.
-        w = max(200, int(self.viewer.width()))
-        h = max(200, int(self.viewer.height()))
-        return w, h
+        return available_doc_size(self.viewer)
 
     def _repaginate_and_render(self):
-        if not self.song:
-            return
-        w, h = self._available_doc_size()
-        filename = self.song_files[self.song_idx].name if self.song_files else "Untitled"
-        chunks = song_to_chunks(self.song)
-        #cfg = self.effective_cfg()
-        eff_cfg = self._effective_cfg()
-        self.pages = paginate_to_fit(eff_cfg, self.song, filename, chunks, w, h)
-        self.page_index = max(0, min(self.page_index, len(self.pages) - 1))
-        self.render()
+        pages, page_index = repaginate_and_render(
+            song=self.song,
+            song_files=self.song_files,
+            song_idx=self.song_idx,
+            page_index=self.page_index,
+            effective_cfg=self._effective_cfg,
+            viewer=self.viewer,
+            render_callback=self.render,
+        )
+        if self.song:
+            self.pages = pages
+            self.page_index = page_index
 
     def render(self):
-        if self.blackout:
-            eff = self._effective_cfg()
-            colors = eff.get("colors", {}) or {}
-            bg = colors.get("background") or colors.get("bg") or "#000000"
-            self.viewer.setHtml(f"<html><body style='background:{bg};'></body></html>")
-            return
-        if not self.song:
-            self.viewer.setHtml(self._welcome_html())
-            return
-        if not self.pages:
+        rendered = render_page(
+            blackout=self.blackout,
+            song=self.song,
+            pages=self.pages,
+            page_index=self.page_index,
+            effective_cfg=self._effective_cfg,
+            welcome_html=self._welcome_html,
+            viewer=self.viewer,
+        )
+        if not rendered:
             self._repaginate_and_render()
             if not self.pages:
                 self.viewer.setHtml(self._welcome_html())
                 return
-        self.viewer.setHtml(self.pages[self.page_index])
+            self.viewer.setHtml(self.pages[self.page_index])
 
     # ---------- Controls ----------
 
     def next_page(self):
-        if not self.pages:
-            return
-        if self.page_index < len(self.pages) - 1:
-            self.page_index += 1
-            self.render()
-        else:
-            self.next_song()
+        self.page_index = playback_next_page(self.pages, self.page_index, self.render, self.next_song)
 
     def prev_page(self):
-        if not self.pages:
-            return
-        if self.page_index > 0:
-            self.page_index -= 1
-            self.render()
-        else:
-            self.prev_song(go_to_last_page=True)
+        self.page_index = playback_prev_page(self.pages, self.page_index, self.render, self.prev_song)
 
     def next_song(self):
-        if not self.song_files:
-            return
-        if self.song_idx < len(self.song_files) - 1:
-            self.load_song_by_index(self.song_idx + 1)
-        else:
-            self.render()
+        playback_next_song(self.song_files, self.song_idx, self.load_song_by_index, self.render)
 
     def prev_song(self, go_to_last_page: bool = False):
-        if not self.song_files:
-            return
-        if self.song_idx > 0:
-            self.load_song_by_index(self.song_idx - 1)
-            if go_to_last_page and self.pages:
-                self.page_index = max(0, len(self.pages) - 1)
-                self.render()
-        else:
-            self.render()
+        new_page_index = playback_prev_song(
+            self.song_files,
+            self.song_idx,
+            self.pages,
+            self.load_song_by_index,
+            self.render,
+            go_to_last_page=go_to_last_page,
+        )
+        if new_page_index is not None:
+            self.page_index = new_page_index
 
     def reload_config(self):
         try:
