@@ -1078,11 +1078,11 @@ class StageProWindow(QMainWindow):
             page_index=self.page_index,
             effective_cfg=self._effective_cfg,
             viewer=self.viewer,
-            render_callback=self.render,
         )
         if self.song:
             self.pages = pages
             self.page_index = page_index
+            self.render()
 
     def render(self):
         rendered = render_page(

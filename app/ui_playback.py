@@ -16,7 +16,6 @@ def repaginate_and_render(
     page_index: int,
     effective_cfg,
     viewer,
-    render_callback,
 ) -> tuple[list[str], int]:
     if not song:
         return [], page_index
@@ -26,7 +25,6 @@ def repaginate_and_render(
     eff_cfg = effective_cfg()
     pages = paginate_to_fit(eff_cfg, song, filename, chunks, w, h)
     page_index = max(0, min(page_index, len(pages) - 1))
-    render_callback()
     return pages, page_index
 
 
