@@ -70,6 +70,17 @@ from .ui_song_utils import (
     make_unique_local_name,
 )
 from .ui_song_editor import build_song_editor_dialog
+from .ui_maintenance import (
+    refresh_playlist_selector,
+    selected_path_for_preview,
+    sync_active_song_to_path,
+)
+from .ui_input import (
+    exit_combo_active,
+    start_or_stop_exit_timer,
+    exit_if_still_held,
+    maybe_handle_onstage_toggle_combo,
+)
 
 class StageProWindow(QMainWindow):
     def __init__(self, base_dir: Path):
@@ -417,18 +428,7 @@ class StageProWindow(QMainWindow):
         self.btn_save_setlist.setToolTip("Export current playlist order to setlist.txt (legacy compatibility)")
 
     def _refresh_playlist_selector(self) -> None:
-        self.cmb_playlist.blockSignals(True)
-        self.cmb_playlist.clear()
-
-        active_id = self.playlists.active_playlist_id
-        active_index = 0
-        for i, pl in enumerate(self.playlists.list_playlists()):
-            self.cmb_playlist.addItem(pl.name, pl.playlist_id)
-            if pl.playlist_id == active_id:
-                active_index = i
-
-        self.cmb_playlist.setCurrentIndex(active_index)
-        self.cmb_playlist.blockSignals(False)
+        refresh_playlist_selector(self.cmb_playlist, self.playlists)
 
     def _load_library_sources(self) -> None:
         self.libraries_cfg = load_libraries_config()
@@ -556,39 +556,17 @@ class StageProWindow(QMainWindow):
             self._sync_active_song_to_path(path)
 
     def _selected_path_for_preview(self) -> Optional[Path]:
-        """Return selected song Path from either playlist or library list."""
-        pl_items = self.maint_playlist_list.selectedItems()
-        if pl_items:
-            return Path(pl_items[0].data(Qt.UserRole))
-        lib_items = self.maint_library_list.selectedItems()
-        if lib_items:
-            return Path(lib_items[0].data(Qt.UserRole))
-        return None
+        return selected_path_for_preview(self.maint_playlist_list, self.maint_library_list)
 
     
     def _sync_active_song_to_path(self, path: Path) -> None:
-            """Sync the active on-stage song to the given path if it's in the current playable list."""
-            self._refresh_song_list()
-            if not self.song_files:
-                return
-            try:
-                target = path.resolve()
-            except Exception:
-                target = path
-            idx = None
-            for i, p in enumerate(self.song_files):
-                try:
-                    if p.resolve() == target:
-                        idx = i
-                        break
-                except Exception:
-                    if p == path:
-                        idx = i
-                        break
-            if idx is None:
-                return
-            if idx != self.song_idx:
-                self.load_song_by_index(idx)
+            sync_active_song_to_path(
+                path=path,
+                refresh_song_list=self._refresh_song_list,
+                get_song_files=lambda: self.song_files,
+                get_song_idx=lambda: self.song_idx,
+                load_song_by_index=self.load_song_by_index,
+            )
 
 
     def _preview_song_in_maintenance(self, path: Path) -> None:
@@ -1018,56 +996,25 @@ class StageProWindow(QMainWindow):
     # ---------- Exit combo + paging ----------
 
     def _exit_combo_active(self) -> bool:
-        pg_pair = (Qt.Key_PageUp in self.pressed_keys) and (Qt.Key_PageDown in self.pressed_keys)
-        lr_pair = (Qt.Key_Left in self.pressed_keys) and (Qt.Key_Right in self.pressed_keys)
-        return pg_pair or lr_pair
+        return exit_combo_active(self.pressed_keys)
 
     def _start_or_stop_exit_timer(self):
-        if self._exit_combo_active():
-            if not self.exit_timer.isActive():
-                self.exit_timer.start(self.exit_hold_ms)
-        else:
-            if self.exit_timer.isActive():
-                self.exit_timer.stop()
+        start_or_stop_exit_timer(self.exit_timer, self.exit_hold_ms, self.pressed_keys)
 
     def _exit_if_still_held(self):
-        if self._exit_combo_active():
-            self.close()
+        exit_if_still_held(self.pressed_keys, self.close)
 
     def _maybe_handle_onstage_toggle_combo(self, key: int) -> bool:
-        """Detect a quick 'both footswitch buttons' press.
-
-        Many pedals are configured to emit PageUp/PageDown. We detect a combo
-        when both keys are pressed within a short window.
-        """
-        if key not in (Qt.Key_PageUp, Qt.Key_PageDown, Qt.Key_Left, Qt.Key_Right):
-            return False
-
-        # Don't retrigger until both keys are released.
-        if self._combo_latched:
-            return False
-
-        # Use monotonic time for stable key timing.
-        import time
-        now_ms = int(time.monotonic() * 1000)
-        self._last_pedal_down[key] = now_ms
-
-        # Determine pair
-        if key in (Qt.Key_PageUp, Qt.Key_PageDown):
-            other = Qt.Key_PageDown if key == Qt.Key_PageUp else Qt.Key_PageUp
-        else:
-            other = Qt.Key_Right if key == Qt.Key_Left else Qt.Key_Left
-
-        other_ts = self._last_pedal_down.get(other)
-        if other_ts is None:
-            return False
-
-        if abs(now_ms - other_ts) <= self._combo_window_ms:
+        handled = maybe_handle_onstage_toggle_combo(
+            key=key,
+            combo_latched=self._combo_latched,
+            last_pedal_down=self._last_pedal_down,
+            combo_window_ms=self._combo_window_ms,
+            toggle_mode_callback=self._toggle_mode,
+        )
+        if handled:
             self._combo_latched = True
-            self._toggle_mode()
-            return True
-
-        return False
+        return handled
 
     def eventFilter(self, obj, event):
         modal = QApplication.activeModalWidget()
