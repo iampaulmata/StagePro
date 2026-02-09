@@ -81,6 +81,11 @@ from .ui_input import (
     exit_if_still_held,
     maybe_handle_onstage_toggle_combo,
 )
+from .ui_rendering import (
+    resize_viewer_to_viewport,
+    fit_view_to_content,
+    apply_orientation_transform,
+)
 
 class StageProWindow(QMainWindow):
     def __init__(self, base_dir: Path):
@@ -284,34 +289,28 @@ class StageProWindow(QMainWindow):
     # ---------- Orientation / Fit ----------
 
     def _resize_viewer_to_viewport(self):
-        margin = self._fit_margin_px()
-        vp = self.view.viewport().size()
-        w = max(200, vp.width() - 2 * margin)
-        h = max(200, vp.height() - 2 * margin)
-
-        # swap size in portrait so the *rotated* content fills
-        if self._is_portrait():
-            self.viewer.setFixedSize(QSize(h, w))
-        else:
-            self.viewer.setFixedSize(QSize(w, h))
+        resize_viewer_to_viewport(
+            view=self.view,
+            viewer=self.viewer,
+            fit_margin_px=self._fit_margin_px(),
+            is_portrait=self._is_portrait(),
+        )
 
     def _apply_orientation_transform(self):
-        if self._is_portrait():
-            self.proxy.setRotation(self._portrait_rotation_deg())
-        else:
-            self.proxy.setRotation(0)
-        self._fit_view_to_content()
+        apply_orientation_transform(
+            proxy=self.proxy,
+            is_portrait=self._is_portrait(),
+            portrait_rotation_deg=self._portrait_rotation_deg(),
+            fit_view_to_content_callback=self._fit_view_to_content,
+        )
 
     def _fit_view_to_content(self):
-        self._resize_viewer_to_viewport()
-        rect: QRectF = self.proxy.sceneBoundingRect()
-        if rect.isNull():
-            return
-        self.view.setSceneRect(rect)
-        if self._fit_mode() == "fill":
-            self.view.fitInView(rect, Qt.KeepAspectRatioByExpanding)
-        else:
-            self.view.fitInView(rect, Qt.KeepAspectRatio)
+        fit_view_to_content(
+            view=self.view,
+            proxy=self.proxy,
+            resize_viewer_to_viewport_callback=self._resize_viewer_to_viewport,
+            fit_mode=self._fit_mode(),
+        )
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
