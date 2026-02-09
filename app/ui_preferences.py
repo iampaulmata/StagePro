@@ -16,33 +16,6 @@ from PySide6.QtWidgets import (
 from .config import get_user_config_dir
 
 
-def _load_theme_colors(base_dir: str, cfg: dict) -> dict:
-    """
-    Loads theme JSON from cfg['theme'] or cfg['theme_path'].
-    Returns a dict of color overrides (possibly empty).
-    """
-    theme_ref = (cfg.get("theme") or cfg.get("theme_path") or "").strip()
-    if not theme_ref:
-        print("[theme] no theme configured")
-        return {}
-
-    p = Path(theme_ref)
-    if not p.is_absolute():
-        p = Path(base_dir) / p
-
-    if not p.exists():
-        print(f"[theme] theme file not found: {p}")
-        return {}
-
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-        colors = (data.get("colors") or {})
-        return dict(colors)
-    except Exception as e:
-        print(f"[theme] failed to load theme {p}: {e}")
-        return {}
-
-
 def _list_theme_files(base_dir: Path) -> list[Path]:
     theme_dirs = [
         base_dir / "themes",
@@ -87,6 +60,16 @@ class PreferencesDialog(QDialog):
         self.theme_combo = QComboBox(self)
         self.theme_combo.addItem("(None)", "")
         cur_theme = (cfg.get("theme") or cfg.get("theme_path") or "").strip()
+        cur_theme_resolved = None
+        if cur_theme:
+            try:
+                cur_theme_resolved = Path(cur_theme)
+                if not cur_theme_resolved.is_absolute():
+                    cur_theme_resolved = (base_dir / cur_theme_resolved).resolve()
+                else:
+                    cur_theme_resolved = cur_theme_resolved.resolve()
+            except Exception:
+                cur_theme_resolved = None
         for p in _list_theme_files(base_dir):
             label = p.stem
             try:
@@ -101,10 +84,29 @@ class PreferencesDialog(QDialog):
                 val = str(p)
             self.theme_combo.addItem(label, val)
         if cur_theme:
+            matched = False
             for i in range(self.theme_combo.count()):
                 if self.theme_combo.itemData(i) == cur_theme:
                     self.theme_combo.setCurrentIndex(i)
+                    matched = True
                     break
+            if not matched and cur_theme_resolved is not None:
+                for i in range(self.theme_combo.count()):
+                    item_val = str(self.theme_combo.itemData(i) or "").strip()
+                    if not item_val:
+                        continue
+                    try:
+                        item_path = Path(item_val)
+                        if not item_path.is_absolute():
+                            item_path = (base_dir / item_path).resolve()
+                        else:
+                            item_path = item_path.resolve()
+                    except Exception:
+                        continue
+                    if item_path == cur_theme_resolved:
+                        self.theme_combo.setCurrentIndex(i)
+                        matched = True
+                        break
         form.addRow("Theme:", self.theme_combo)
 
         self.orientation_combo = QComboBox(self)

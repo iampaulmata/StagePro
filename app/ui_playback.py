@@ -9,6 +9,33 @@ def available_doc_size(viewer) -> tuple[int, int]:
     return w, h
 
 
+def inject_pinned_footer(html: str, page_num: int, page_total: int, height_px: int) -> str:
+    if "</body>" not in html:
+        return html
+
+    h = max(200, int(height_px))
+    bottom_pad = 8
+    footer_block_h = 58
+    top_px = max(0, h - footer_block_h - bottom_pad)
+
+    if "<body>" in html:
+        html = html.replace(
+            "<body>",
+            f"<body style='position:relative;height:{h}px;overflow:hidden;'>",
+            1,
+        )
+
+    pin = (
+        f"<div style='position:absolute;left:24px;right:24px;top:{top_px}px;"
+        "display:flex;justify-content:space-between;align-items:flex-end;"
+        "font-family:inherit;pointer-events:none;'>"
+        f"<div style='opacity:0.75'>Page {page_num} / {page_total}</div>"
+        "<div style='opacity:0.55'>PgUp/PgDn • Hold PgUp+PgDn OR ←+→ to exit</div>"
+        "</div>"
+    )
+    return html.replace("</body>", pin + "</body>")
+
+
 def repaginate_and_render(
     song,
     song_files,
@@ -48,7 +75,10 @@ def render_page(
         return True
     if not pages:
         return False
-    viewer.setHtml(pages[page_index])
+    html = pages[page_index]
+    _, h = available_doc_size(viewer)
+    html = inject_pinned_footer(html, page_index + 1, len(pages), h)
+    viewer.setHtml(html)
     return True
 
 

@@ -1,5 +1,22 @@
 from typing import List, Tuple, Optional
 from .chordpro import Song, Block, Line, Token
+
+# Renderer semantic contract (parser -> renderer):
+# - "verse", "chorus", "bridge" are content sections
+# - "comment" is rendered separately in song_to_chunks()
+SEMANTIC_CONTENT_SECTIONS = {"verse", "chorus", "bridge"}
+
+
+def normalize_content_section_kind(block_kind: str | None) -> str:
+    """
+    Normalize parser block kinds into renderer semantic section kinds.
+
+    Unknown kinds gracefully map to "verse" for backward compatibility.
+    """
+    kind = (block_kind or "verse").strip().lower()
+    return kind if kind in SEMANTIC_CONTENT_SECTIONS else "verse"
+
+
 def escape_html(s: str) -> str:
     return (
         s.replace("&", "&amp;")
@@ -21,7 +38,25 @@ def song_label_title(song: Song, fallback: str) -> Tuple[str, str, str]:
 def stagepro_css(cfg: dict) -> str:
     font = cfg.get("font", {}) or {}
     colors = cfg.get("colors", {}) or {}
+    styles = cfg.get("styles", {}) or {}
     ui = cfg.get("ui", {}) or {}
+
+    def _style_css(*keys: str) -> str:
+        vals = []
+        for k in keys:
+            raw = styles.get(k)
+            if raw:
+                if isinstance(raw, str):
+                    vals.extend([x.strip().lower() for x in raw.split(",") if x.strip()])
+                elif isinstance(raw, list):
+                    vals.extend([str(x).strip().lower() for x in raw if str(x).strip()])
+        vals = list(dict.fromkeys(vals))
+        css_bits = []
+        if "bold" in vals:
+            css_bits.append("font-weight: 600")
+        if "italic" in vals:
+            css_bits.append("font-style: italic")
+        return ("; ".join(css_bits) + ";") if css_bits else ""
 
     family = font.get("family", "DejaVu Sans")
     size_px = int(font.get("size_px", 34))
@@ -76,18 +111,33 @@ def stagepro_css(cfg: dict) -> str:
     footer = colors.get("footer") or colors.get("ui.footer") or text
     hint = colors.get("hint") or colors.get("ui.hint") or text
 
+    verse_style = _style_css("section.verse", "verse", "verse_text")
+    chorus_style = _style_css("section.chorus", "chorus", "chorus_text")
+    comment_style = _style_css("section.comment", "comment")
+    title_style = _style_css("directive.title", "title")
+    subtitle_style = _style_css("directive.subtitle", "subtitle")
+    meta_style = _style_css("directive.meta", "meta")
+
     pad_x = int(ui.get("padding_x", 36))
     pad_y = int(ui.get("padding_y", 24))
 
     return f"""
-    body {{ background:{bg}; color:{text}; margin:0; }}
-    .wrap {{ padding:{pad_y}px {pad_x}px; box-sizing:border-box; }}
-    .title {{ color:{title_color}; font-size:{int(size_px*1.15)}px; font-weight:750; margin:0 0 6px 0; }}
-    .subtitle {{ color:{subtitle_color}; font-size:{int(size_px*0.7)}px; opacity:0.88; margin:0 0 6px 0; }}
-    .meta {{ color:{meta_color}; font-size:{int(size_px*0.5)}px; opacity:0.75; margin:0 0 18px 0; }}
+    html, body {{ height:100%; margin:0; }}
+    body {{ background:{bg}; color:{text}; overflow:hidden; }}
+    .wrap {{
+      position: relative;
+      height: 100%;
+      padding:{pad_y}px {pad_x}px;
+      padding-bottom:{max(48, int(size_px*1.8))}px;
+      box-sizing:border-box;
+      overflow:hidden;
+    }}
+    .title {{ color:{title_color}; font-size:{int(size_px*1.15)}px; font-weight:750; margin:0 0 6px 0; {title_style} }}
+    .subtitle {{ color:{subtitle_color}; font-size:{int(size_px*0.7)}px; opacity:0.88; margin:0 0 6px 0; {subtitle_style} }}
+    .meta {{ color:{meta_color}; font-size:{int(size_px*0.5)}px; opacity:0.75; margin:0 0 18px 0; {meta_style} }}
 
     .block {{ margin:0 0 14px 0; }}
-    .comment {{ font-size:{int(size_px*0.6)}px; opacity:0.92; font-style:italic; margin:0 0 12px 0; color:{comment}; }}
+    .comment {{ font-size:{int(size_px*0.6)}px; opacity:0.92; font-style:italic; margin:0 0 12px 0; color:{comment}; {comment_style} }}
 
     .line {{
       font-family: {family}, DejaVu Sans, Liberation Sans, Noto Sans, Arial, sans-serif;
@@ -99,6 +149,7 @@ def stagepro_css(cfg: dict) -> str:
       overflow-wrap: anywhere;
       word-break: normal;
       color: {verse_text};
+      {verse_style}
     }}
 
     .chorusline {{
@@ -106,7 +157,12 @@ def stagepro_css(cfg: dict) -> str:
       color: {chorus_text};
       padding-left: 14px;
       margin-left: 0;
+      {chorus_style}
     }}
+
+    .line.section-verse {{ color: {verse_text}; }}
+    .line.section-chorus {{ color: {chorus_text}; }}
+    .line.section-bridge {{ color: {verse_text}; }}
 
     .seg {{
       position: relative;
@@ -129,23 +185,8 @@ def stagepro_css(cfg: dict) -> str:
 
     .spacer {{ height: 10px; }}
 
-    .footer {{
-      position: fixed;
-      bottom: 18px;
-      right: 24px;
-      font-size:{int(size_px*0.45)}px;
-      opacity:0.75;
-      color:{footer};
-    }}
-
-    .hint {{
-      position: fixed;
-      bottom: 18px;
-      left: 24px;
-      font-size:{int(size_px*0.42)}px;
-      opacity:0.55;
-      color:{hint};
-    }}
+    .footer {{ color:{footer}; }}
+    .hint {{ color:{hint}; }}
     """
 
 def tokens_to_segments(tokens: List[Token]) -> List[Tuple[Optional[str], str]]:
@@ -169,11 +210,15 @@ def tokens_to_segments(tokens: List[Token]) -> List[Tuple[Optional[str], str]]:
         segs.append((pending_chord, " "))
     return segs
 
-def render_line_html(line: Line, chorus: bool) -> str:
+def render_line_html(line: Line, block_kind: str) -> str:
     segs = tokens_to_segments(line.tokens)
 
     parts: List[str] = []
-    klass = "line chorusline" if chorus else "line"
+    kind = normalize_content_section_kind(block_kind)
+    classes = ["line", f"section-{kind}"]
+    if kind == "chorus":
+        classes.append("chorusline")
+    klass = " ".join(classes)
     parts.append(f"<div class='{klass}'>")
 
     for chord, lyric in segs:
@@ -191,7 +236,7 @@ def song_to_chunks(song: Song) -> List[str]:
     Produce a flat list of HTML chunks at safe breakpoints:
     - comment chunks
     - spacer chunks
-    - individual line chunks (verse/chorus)
+    - individual line chunks (semantic content sections)
     """
     chunks: List[str] = []
 
@@ -200,9 +245,8 @@ def song_to_chunks(song: Song) -> List[str]:
             chunks.append(f"<div class='comment'>{escape_html(block.text or '')}</div>")
             continue
         
-        chorus = (block.kind == "chorus")
         for ln in block.lines:
-            chunks.append(render_line_html(ln, chorus=chorus))
+            chunks.append(render_line_html(ln, block_kind=block.kind))
         chunks.append("<div class='spacer'></div>")  # blank line between blocks
 
     # Trim trailing spacer if present
@@ -239,7 +283,5 @@ def render_page_html(
 
     out.extend(body_chunks)
 
-    out.append(f"<div class='footer'>{escape_html(song_filename)} • Page {page_num} / {page_total}</div>")
-    out.append("<div class='hint'>PgUp/PgDn • Hold PgUp+PgDn OR ←+→ to exit</div>")
     out.append("</div></body></html>")
     return "".join(out)

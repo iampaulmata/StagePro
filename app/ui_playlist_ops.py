@@ -68,16 +68,16 @@ def on_playlist_changed(cmb_playlist, set_active_callback, refresh_maintenance_l
 
 
 def pl_new(parent, create_playlist_callback, refresh_maintenance_list_callback) -> None:
-    name, ok = QInputDialog.getText(parent, "New Playlist", "Playlist name:")
+    name, ok = QInputDialog.getText(parent, "New Setlist", "Setlist name:")
     if not ok:
         return
-    create_playlist_callback(name=name.strip() or "New Playlist", items=[])
+    create_playlist_callback(name=name.strip() or "New Setlist", items=[])
     refresh_maintenance_list_callback(preserve_selection=False)
 
 
 def pl_rename(parent, playlists_get_active, rename_playlist_callback, refresh_maintenance_list_callback) -> None:
     pl = playlists_get_active()
-    name, ok = QInputDialog.getText(parent, "Rename Playlist", "New name:", text=pl.name)
+    name, ok = QInputDialog.getText(parent, "Rename Setlist", "New name:", text=pl.name)
     if not ok:
         return
     rename_playlist_callback(pl.playlist_id, name.strip() or pl.name)
@@ -94,8 +94,8 @@ def pl_delete(parent, playlists_get_active, delete_playlist_callback, refresh_ma
     pl = playlists_get_active()
     resp = QMessageBox.question(
         parent,
-        "Delete Playlist",
-        f"Delete playlist '{pl.name}'?\n\nThis will NOT delete any song files.",
+        "Delete Setlist",
+        f"Delete setlist '{pl.name}'?\n\nThis will NOT delete any song files.",
         QMessageBox.Yes | QMessageBox.No,
     )
     if resp != QMessageBox.Yes:
