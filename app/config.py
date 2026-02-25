@@ -104,6 +104,12 @@ def default_config() -> dict:
         },
         "shortcuts": {
             "exit_hold_ms": 1500
+        },
+        "integrations": {
+            "ultimate_guitar": {
+                "enabled": True,
+                "timeout_s": 8.0
+            }
         }
     }
 
