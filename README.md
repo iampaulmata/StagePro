@@ -59,6 +59,7 @@ StagePro is designed to run reliably on laptops, mini PCs, and dedicated **portr
 - Mode switching (Maintenance ↔ On-Stage)
 - Designed for USB foot pedals and keyboard shortcuts
 
+
 ### 🧠 Smart Metadata
 - Optional **MusicBrainz** integration for metadata autofill
 - Non-destructive updates to song files
