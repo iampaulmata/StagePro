@@ -210,3 +210,4 @@ See `LICENSE` for details.
 StagePro is actively developed and open to contributions.
 
 Bug reports, feature requests, and pull requests are welcome.
+
