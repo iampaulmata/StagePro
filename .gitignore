@@ -58,6 +58,11 @@ songs/**
 !songs/.gitkeep
 
 # =========================
+# Plans (IGNORE ALL PLANNING FILES)
+# =========================
+plans/**
+
+# =========================
 # Themes
 # =========================
 themes/_local/

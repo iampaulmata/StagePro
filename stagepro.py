@@ -5,8 +5,8 @@ from pathlib import Path
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QApplication
 
-from stagepro.ui_main import StageProWindow
-from stagepro.config import APP_NAME  # APP_NAME = "stagepro"
+from app.ui_main import StageProWindow
+from app.config import APP_NAME  # APP_NAME = "stagepro"
 
 def main():
     # Human-facing identity

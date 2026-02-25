@@ -18,6 +18,7 @@ from PySide6.QtGui import (
     QGuiApplication,
     QCursor,
     QTextCursor,
+    QIcon,
 )
 
 from PySide6.QtWidgets import (
@@ -25,6 +26,8 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QTextBrowser,
+    QFrame,
+    QAbstractItemView,
     QWidget,
     QStackedWidget,
     QVBoxLayout,
@@ -33,23 +36,25 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPushButton,
-    QFileDialog,
     QLabel,
     QDialog,
     QDialogButtonBox,
     QGraphicsScene,
     QGraphicsView,
     QComboBox,
-    QInputDialog,
     QLineEdit,
     QSizePolicy,
     QTextEdit,
+    QToolButton,
+    QStyle,
 )
 
 from .config import load_or_create_config, resolve_songs_path
 from .playlist import list_song_files_alpha_from_roots
 from .playlists_store import PlaylistStore
 from .chordpro import Song, parse_chordpro
+from .render import song_to_chunks
+from .paginate import paginate_to_fit
 from .chordpro_edit import upsert_directives
 from .importers import (
     ImportErrorWithHint,
@@ -60,14 +65,56 @@ from .musicbrainz import MusicBrainzClient, MBRecordingHit
 from .config import get_user_config_dir
 from .paths import overrides_dir
 from .libraries.model import load_libraries_config
-from .render import song_to_chunks
-from .paginate import paginate_to_fit
-from .ui_preferences import PreferencesDialog, _load_theme_colors
+from .theme import resolve_theme_tokens
+from .ui_preferences import PreferencesDialog
 from .ui_song_utils import (
     read_song_text_for_edit,
     is_under_dir,
     library_published_root_for,
     make_unique_local_name,
+)
+from .ui_song_editor import build_song_editor_dialog
+from .ui_maintenance import (
+    refresh_playlist_selector,
+    selected_path_for_preview,
+    sync_active_song_to_path,
+)
+from .ui_input import (
+    exit_combo_active,
+    start_or_stop_exit_timer,
+    exit_if_still_held,
+    maybe_handle_onstage_toggle_combo,
+)
+from .ui_rendering import (
+    resize_viewer_to_viewport,
+    fit_view_to_content,
+    apply_orientation_transform,
+)
+from .ui_playback import (
+    available_doc_size,
+    repaginate_and_render,
+    render_page,
+    next_page as playback_next_page,
+    prev_page as playback_prev_page,
+    next_song as playback_next_song,
+    prev_song as playback_prev_song,
+)
+from .ui_playlist_ops import (
+    move_selected_item,
+    persist_current_playlist_order,
+    add_filename_to_active_playlist,
+    add_selected_library_to_playlist,
+    remove_selected_from_playlist,
+    on_playlist_changed,
+    pl_new,
+    pl_rename,
+    pl_duplicate,
+    pl_delete,
+    save_setlist_from_ui,
+)
+from .ui_imports import (
+    on_import_clicked,
+    on_mb_autofill_clicked,
 )
 
 class StageProWindow(QMainWindow):
@@ -125,22 +172,26 @@ class StageProWindow(QMainWindow):
         self.search_box = QLineEdit(self.maint_left)
         self.search_box.setPlaceholderText("Search library")
 
-        self.lbl_playlist = QLabel("Playlist", self.maint_left)
+        self.lbl_playlist = QLabel("Setlist", self.maint_left)
         self.maint_playlist_list = QListWidget(self.maint_left)
+        self.maint_playlist_list.setDragDropMode(QAbstractItemView.InternalMove)
+        self.maint_playlist_list.setDefaultDropAction(Qt.MoveAction)
+        self.maint_playlist_list.setDragEnabled(True)
+        self.maint_playlist_list.setAcceptDrops(True)
+        self.maint_playlist_list.setDropIndicatorShown(True)
+        self.maint_playlist_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
         self.lbl_library = QLabel("Library", self.maint_left)
         self.maint_library_list = QListWidget(self.maint_left)
-
-        self.maint_left_layout.addWidget(self.search_box)
-        self.maint_left_layout.addWidget(self.lbl_playlist)
-        self.maint_left_layout.addWidget(self.maint_playlist_list, 1)
-        self.maint_left_layout.addWidget(self.lbl_library)
-        self.maint_left_layout.addWidget(self.maint_library_list, 1)
+        self.btn_select_all_library = QPushButton("Select All", self.maint_left)
+        self.btn_clear_all_library = QPushButton("Clear All", self.maint_left)
+        self.btn_add_checked_from_library = QPushButton("Add Selected to Setlist", self.maint_left)
 
         # Right column: preview
         self.maint_preview = QTextBrowser(self.maint_root)
         self.maint_preview.setOpenExternalLinks(False)
         self.maint_preview.setStyleSheet("QTextBrowser { border: 1px solid #333; }")
+        self.maint_preview.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
         self.btn_import = QPushButton("Import Songs…")
         self.btn_save_setlist = QPushButton("Save Setlist")
@@ -190,6 +241,9 @@ class StageProWindow(QMainWindow):
         self.mb = MusicBrainzClient(cache_path=cache_path)
 
         self._build_actions()
+        app_icon = self.base_dir / "assets" / "stagepro.png"
+        if app_icon.exists():
+            self.setWindowIcon(QIcon(str(app_icon)))
         self.setWindowTitle("StagePro")
         self._load_first_song_or_welcome()
         self._refresh_maintenance_list()
@@ -239,12 +293,17 @@ class StageProWindow(QMainWindow):
     def _effective_cfg(self) -> dict:
         cfg = dict(self.cfg)
         colors = dict(cfg.get("colors", {}) or {})
+        styles = dict(cfg.get("styles", {}) or {})
 
-        theme_colors = _load_theme_colors(self.base_dir, cfg)
+        theme_tokens = resolve_theme_tokens(self.base_dir, cfg)
+        theme_colors = dict(theme_tokens.get("colors") or {})
+        theme_styles = dict(theme_tokens.get("styles") or {})
         # Theme wins over base colors:
         colors.update(theme_colors)
+        styles.update(theme_styles)
 
         cfg["colors"] = colors
+        cfg["styles"] = styles
         return cfg
 
     def _is_portrait(self) -> bool:
@@ -272,45 +331,45 @@ class StageProWindow(QMainWindow):
     # ---------- Orientation / Fit ----------
 
     def _resize_viewer_to_viewport(self):
-        margin = self._fit_margin_px()
-        vp = self.view.viewport().size()
-        w = max(200, vp.width() - 2 * margin)
-        h = max(200, vp.height() - 2 * margin)
-
-        # swap size in portrait so the *rotated* content fills
-        if self._is_portrait():
-            self.viewer.setFixedSize(QSize(h, w))
-        else:
-            self.viewer.setFixedSize(QSize(w, h))
+        resize_viewer_to_viewport(
+            view=self.view,
+            viewer=self.viewer,
+            fit_margin_px=self._fit_margin_px(),
+            is_portrait=self._is_portrait(),
+        )
 
     def _apply_orientation_transform(self):
-        if self._is_portrait():
-            self.proxy.setRotation(self._portrait_rotation_deg())
-        else:
-            self.proxy.setRotation(0)
-        self._fit_view_to_content()
+        apply_orientation_transform(
+            proxy=self.proxy,
+            is_portrait=self._is_portrait(),
+            portrait_rotation_deg=self._portrait_rotation_deg(),
+            fit_view_to_content_callback=self._fit_view_to_content,
+        )
 
     def _fit_view_to_content(self):
-        self._resize_viewer_to_viewport()
-        rect: QRectF = self.proxy.sceneBoundingRect()
-        if rect.isNull():
-            return
-        self.view.setSceneRect(rect)
-        if self._fit_mode() == "fill":
-            self.view.fitInView(rect, Qt.KeepAspectRatioByExpanding)
-        else:
-            self.view.fitInView(rect, Qt.KeepAspectRatio)
+        fit_view_to_content(
+            view=self.view,
+            proxy=self.proxy,
+            resize_viewer_to_viewport_callback=self._resize_viewer_to_viewport,
+            fit_mode=self._fit_mode(),
+        )
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._fit_view_to_content()
         # Re-paginate on resize because wrapping changes height
         self._repaginate_and_render()
+        self._apply_maintenance_preview_geometry()
+        try:
+            self._update_setlist_row_elision()
+        except Exception:
+            pass
 
     def showEvent(self, event):
         super().showEvent(event)
         self._apply_orientation_transform()
         self._repaginate_and_render()
+        self._apply_maintenance_preview_geometry()
 
     # ---------- Mode management ----------
 
@@ -340,11 +399,47 @@ class StageProWindow(QMainWindow):
     def _build_maintenance_ui(self) -> None:
         """Builds the maintenance-mode UI (library + setlist + import tools)."""
         root = self.maint_root
-        outer = QVBoxLayout(root)
-        outer.setContentsMargins(8, 8, 8, 8)
-        outer.setSpacing(6)
+        root.setObjectName("maintenanceRoot")
+        root.setStyleSheet(
+            """
+            QWidget#maintenanceRoot { background: palette(window); }
+            QFrame#maintToolbar,
+            QWidget#maintLeftPanel,
+            QFrame#maintPreviewPanel {
+                border: 1px solid palette(mid);
+                border-radius: 8px;
+                background: palette(base);
+            }
+            QLabel#maintSectionLabel {
+                font-size: 13px;
+                font-weight: 650;
+                color: palette(window-text);
+            }
+            QTextBrowser#maintPreview {
+                border: 1px solid palette(mid);
+                border-radius: 6px;
+                padding: 6px;
+                background: palette(base);
+            }
+            QLineEdit#maintSearchBox {
+                min-height: 30px;
+                padding: 4px 8px;
+            }
+            QPushButton { min-height: 28px; padding: 2px 10px; }
+            QLabel#maintStatus {
+                padding: 6px 8px;
+                border: 1px solid palette(mid);
+                border-radius: 6px;
+                background: palette(base);
+            }
+            """
+        )
 
-                # Make the top controls portrait-friendly by using two rows instead of one long horizontal bar.
+        outer = QVBoxLayout(root)
+        outer.setContentsMargins(12, 12, 12, 12)
+        outer.setSpacing(10)
+
+        # Make the top controls portrait-friendly by using two rows instead of one long horizontal bar.
         # (A single wide row can force an oversized minimum window width on rotated/portrait displays.)
         self.cmb_playlist.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.cmb_playlist.setMinimumContentsLength(8)
@@ -354,44 +449,97 @@ class StageProWindow(QMainWindow):
             # Older Qt builds may not expose this enum; it's safe to ignore.
             pass
 
-        row1 = QHBoxLayout()
-        row1.addWidget(self.btn_import)
-        row1.addSpacing(6)
-        row1.addWidget(self.btn_mb_autofill)
-        row1.addStretch(1)
-        row1.addWidget(QLabel("Playlist:"))
-        row1.addWidget(self.cmb_playlist, 1)
-        row1.addWidget(self.btn_pl_new)
-        row1.addWidget(self.btn_pl_rename)
-        row1.addWidget(self.btn_pl_dup)
-        row1.addWidget(self.btn_pl_del)
+        self.search_box.setObjectName("maintSearchBox")
+        self.lbl_playlist.setObjectName("maintSectionLabel")
+        self.lbl_library.setObjectName("maintSectionLabel")
+        self.maint_status.setObjectName("maintStatus")
+        self.maint_preview.setObjectName("maintPreview")
 
-        row2 = QHBoxLayout()
-        row2.addWidget(QLabel("Order:"))
-        row2.addWidget(self.btn_move_up)
-        row2.addWidget(self.btn_move_down)
-        row2.addWidget(self.btn_add_to_set)
-        row2.addSpacing(12)
-        row2.addWidget(self.btn_edit_song)
+        self.search_box.setClearButtonEnabled(True)
+        self.search_box.setPlaceholderText("Search library songs…")
 
-        row2.addWidget(self.btn_remove_from_set)
-        row2.addStretch(1)
-        row2.addWidget(self.btn_save_setlist)  # export-to-setlist.txt (legacy compatibility)
+        self.maint_left.setObjectName("maintLeftPanel")
+        self.maint_left_layout.setContentsMargins(10, 10, 10, 10)
+        self.maint_left_layout.setSpacing(10)
 
-        outer.addLayout(row1)
-        outer.addLayout(row2)
+        playlist_section = QFrame(self.maint_left)
+        playlist_layout = QVBoxLayout(playlist_section)
+        playlist_layout.setContentsMargins(0, 0, 0, 0)
+        playlist_layout.setSpacing(6)
+        setlist_header = QHBoxLayout()
+        setlist_header.setContentsMargins(0, 0, 0, 0)
+        setlist_header.setSpacing(8)
+        setlist_header.addWidget(self.lbl_playlist)
+        setlist_header.addWidget(self.cmb_playlist, 1)
+        playlist_layout.addLayout(setlist_header)
+        playlist_layout.addWidget(self.maint_playlist_list, 1)
+
+        library_section = QFrame(self.maint_left)
+        library_layout = QVBoxLayout(library_section)
+        library_layout.setContentsMargins(0, 0, 0, 0)
+        library_layout.setSpacing(6)
+        library_layout.addWidget(self.lbl_library)
+        library_layout.addWidget(self.maint_library_list, 1)
+        library_actions = QHBoxLayout()
+        library_actions.setContentsMargins(0, 0, 0, 0)
+        library_actions.setSpacing(6)
+        for b in (
+            self.btn_select_all_library,
+            self.btn_clear_all_library,
+            self.btn_add_checked_from_library,
+        ):
+            b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            b.setMinimumHeight(30)
+            library_actions.addWidget(b, 1)
+        library_layout.addLayout(library_actions)
+
+        self.maint_left_layout.addWidget(playlist_section, 1)
+        self.maint_left_layout.addWidget(self.search_box)
+        self.maint_left_layout.addWidget(library_section, 1)
+
+        preview_panel = QFrame(root)
+        preview_panel.setObjectName("maintPreviewPanel")
+        preview_layout = QVBoxLayout(preview_panel)
+        preview_layout.setContentsMargins(10, 10, 10, 10)
+        preview_layout.setSpacing(8)
+        preview_title = QLabel("Preview", preview_panel)
+        preview_title.setObjectName("maintSectionLabel")
+        self.lbl_preview_mode = QLabel("", preview_panel)
+        self.lbl_preview_mode.setObjectName("maintSectionLabel")
+        preview_head = QHBoxLayout()
+        preview_head.addWidget(preview_title)
+        preview_head.addStretch(1)
+        preview_head.addWidget(self.lbl_preview_mode)
+        preview_layout.addLayout(preview_head)
+
+        self.maint_preview_canvas = QWidget(preview_panel)
+        preview_canvas_layout = QHBoxLayout(self.maint_preview_canvas)
+        preview_canvas_layout.setContentsMargins(0, 0, 0, 0)
+        preview_canvas_layout.setSpacing(0)
+        preview_canvas_layout.addStretch(1)
+        preview_canvas_layout.addWidget(self.maint_preview, 0, Qt.AlignCenter)
+        preview_canvas_layout.addStretch(1)
+        preview_layout.addWidget(self.maint_preview_canvas, 1)
 
         split = QSplitter(Qt.Horizontal)
         split.addWidget(self.maint_left)
-        split.addWidget(self.maint_preview)
-        split.setStretchFactor(0, 0)
-        split.setStretchFactor(1, 1)
+        split.addWidget(preview_panel)
+        split.setHandleWidth(8)
+        split.setChildrenCollapsible(False)
+        split.setStretchFactor(0, 3)
+        split.setStretchFactor(1, 7)
+        split.setSizes([420, 980])
         outer.addWidget(split, 1)
         outer.addWidget(self.maint_status)
+
+        self.maint_playlist_list.model().rowsMoved.connect(lambda *_: self._persist_current_playlist_order())
 
         self.maint_playlist_list.itemSelectionChanged.connect(self._on_maint_selection_changed)
         self.maint_library_list.itemSelectionChanged.connect(self._on_maint_selection_changed)
         self.maint_library_list.itemDoubleClicked.connect(lambda _: self._add_selected_library_to_playlist())
+        self.btn_select_all_library.clicked.connect(self._select_all_library_checks)
+        self.btn_clear_all_library.clicked.connect(self._clear_library_checks)
+        self.btn_add_checked_from_library.clicked.connect(self._add_checked_library_to_playlist)
         self.btn_edit_song.clicked.connect(self._on_edit_song_clicked)
         self.search_box.textChanged.connect(lambda _: self._refresh_maintenance_list(preserve_selection=True))
         self.btn_import.clicked.connect(self._on_import_clicked)
@@ -414,20 +562,28 @@ class StageProWindow(QMainWindow):
         self.btn_add_to_set.setToolTip("Add selected Library song to the current playlist (does not copy files)")
         self.btn_remove_from_set.setToolTip("Remove selected song from the current playlist (does not delete the file)")
         self.btn_save_setlist.setToolTip("Export current playlist order to setlist.txt (legacy compatibility)")
+        self.btn_select_all_library.setToolTip("Select all available songs in the Library")
+        self.btn_clear_all_library.setToolTip("Clear all selected songs in the Library")
+        self.btn_add_checked_from_library.setToolTip("Add all checked library songs to the active setlist")
+
+        for btn in (
+            self.btn_import,
+            self.btn_save_setlist,
+            self.btn_edit_song,
+            self.btn_move_up,
+            self.btn_move_down,
+            self.btn_mb_autofill,
+            self.btn_pl_new,
+            self.btn_pl_rename,
+            self.btn_pl_dup,
+            self.btn_pl_del,
+            self.btn_add_to_set,
+            self.btn_remove_from_set,
+        ):
+            btn.setVisible(False)
 
     def _refresh_playlist_selector(self) -> None:
-        self.cmb_playlist.blockSignals(True)
-        self.cmb_playlist.clear()
-
-        active_id = self.playlists.active_playlist_id
-        active_index = 0
-        for i, pl in enumerate(self.playlists.list_playlists()):
-            self.cmb_playlist.addItem(pl.name, pl.playlist_id)
-            if pl.playlist_id == active_id:
-                active_index = i
-
-        self.cmb_playlist.setCurrentIndex(active_index)
-        self.cmb_playlist.blockSignals(False)
+        refresh_playlist_selector(self.cmb_playlist, self.playlists)
 
     def _load_library_sources(self) -> None:
         self.libraries_cfg = load_libraries_config()
@@ -463,7 +619,7 @@ class StageProWindow(QMainWindow):
         return None
 
     def _refresh_maintenance_list(self, preserve_selection: bool = False) -> None:
-        """Refresh Maintenance Mode playlist + library lists."""
+        """Refresh Maintenance Mode setlist + library lists."""
         self._refresh_playlist_selector()
 
         # Preserve selection paths if requested
@@ -507,14 +663,23 @@ class StageProWindow(QMainWindow):
             it = QListWidgetItem(name)
             it.setData(Qt.UserRole, str(p))
             self.maint_playlist_list.addItem(it)
+        self._decorate_setlist_rows()
 
-        # Populate library list; disable items already in playlist
+        checked_lib_paths = set()
+        for i in range(self.maint_library_list.count()):
+            it = self.maint_library_list.item(i)
+            if it and it.checkState() == Qt.Checked:
+                checked_lib_paths.add(str(it.data(Qt.UserRole)))
+
+        # Populate library list; disable items already in setlist
         playlist_set = {n.lower() for n in playlist_names}
         self.maint_library_list.clear()
         for name in lib_names:
             p = next((lp for lp in lib_paths if lp.name == name), self.songs_dir / name)
             it = QListWidgetItem(name)
             it.setData(Qt.UserRole, str(p))
+            it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
+            it.setCheckState(Qt.Checked if str(p) in checked_lib_paths else Qt.Unchecked)
             if name.lower() in playlist_set:
                 it.setFlags(it.flags() & ~Qt.ItemIsEnabled)
             self.maint_library_list.addItem(it)
@@ -554,40 +719,137 @@ class StageProWindow(QMainWindow):
         if self.maint_playlist_list.selectedItems():
             self._sync_active_song_to_path(path)
 
+    def _setlist_row_for_path(self, path_str: str) -> int:
+        for i in range(self.maint_playlist_list.count()):
+            it = self.maint_playlist_list.item(i)
+            if str(it.data(Qt.UserRole)) == str(path_str):
+                return i
+        return -1
+
+    def _edit_song_by_path(self, path_str: str) -> None:
+        row = self._setlist_row_for_path(path_str)
+        if row < 0:
+            return
+        self.maint_playlist_list.setCurrentRow(row)
+        self._on_edit_song_clicked()
+
+    def _remove_song_by_path(self, path_str: str) -> None:
+        row = self._setlist_row_for_path(path_str)
+        pid = self.playlists.active_playlist_id
+        if row < 0 or not pid:
+            return
+        self.playlists.remove_items_by_index(pid, [row])
+        self._refresh_maintenance_list(preserve_selection=False)
+        self._load_first_song_or_welcome()
+
+    def _icon_tool_button(self, icon: QIcon, fallback_text: str, tooltip: str, parent: QWidget) -> QToolButton:
+        btn = QToolButton(parent)
+        if icon.isNull():
+            btn.setText(fallback_text)
+        else:
+            btn.setIcon(icon)
+        btn.setAutoRaise(True)
+        btn.setToolTip(tooltip)
+        return btn
+
+    def _decorate_setlist_rows(self) -> None:
+        for i in range(self.maint_playlist_list.count()):
+            item = self.maint_playlist_list.item(i)
+            if not item:
+                continue
+            path_str = str(item.data(Qt.UserRole))
+            name = str(item.data(Qt.UserRole + 1) or item.text() or "")
+            item.setData(Qt.UserRole + 1, name)
+
+            row = QWidget(self.maint_playlist_list)
+            layout = QHBoxLayout(row)
+            layout.setContentsMargins(8, 2, 8, 2)
+            layout.setSpacing(6)
+
+            drag_btn = self._icon_tool_button(QIcon(), "☰", "Drag to reorder", row)
+            drag_btn.setCursor(Qt.OpenHandCursor)
+            # Let mouse events pass through so QListWidget can initiate InternalMove drag.
+            drag_btn.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+            drag_btn.setObjectName("setlistDrag")
+            drag_btn.setFixedWidth(24)
+
+            title_lbl = QLabel(name, row)
+            title_lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            title_lbl.setMinimumWidth(0)
+            title_lbl.setObjectName("setlistTitle")
+            title_lbl.setProperty("full_name", name)
+            title_lbl.setToolTip(name)
+            row.setToolTip(name)
+
+            edit_icon = QIcon.fromTheme("document-edit")
+            edit_btn = self._icon_tool_button(edit_icon, "✎", "Edit song", row)
+            edit_btn.setObjectName("setlistEdit")
+            edit_btn.setFixedWidth(24)
+            edit_btn.clicked.connect(lambda _=False, p=path_str: self._edit_song_by_path(p))
+
+            trash_icon = self.style().standardIcon(QStyle.SP_TrashIcon)
+            remove_btn = self._icon_tool_button(trash_icon, "🗑", "Remove from setlist", row)
+            remove_btn.setObjectName("setlistRemove")
+            remove_btn.setFixedWidth(24)
+            remove_btn.clicked.connect(lambda _=False, p=path_str: self._remove_song_by_path(p))
+
+            layout.addWidget(drag_btn)
+            layout.addWidget(title_lbl, 1)
+            layout.addWidget(edit_btn)
+            layout.addWidget(remove_btn)
+
+            # Prevent default QListWidget text painting from doubling with custom row widget.
+            item.setText("")
+            item.setSizeHint(row.sizeHint())
+            self.maint_playlist_list.setItemWidget(item, row)
+
+        self._update_setlist_row_elision()
+
+    def _update_setlist_row_elision(self) -> None:
+        vpw = max(120, self.maint_playlist_list.viewport().width())
+        for i in range(self.maint_playlist_list.count()):
+            it = self.maint_playlist_list.item(i)
+            if not it:
+                continue
+            row = self.maint_playlist_list.itemWidget(it)
+            if not row:
+                continue
+
+            # Constrain custom row widget to viewport width so icons stay visible.
+            row.setFixedWidth(max(120, vpw - 2))
+
+            title_lbl = row.findChild(QLabel, "setlistTitle")
+            if not title_lbl:
+                continue
+            full = str(title_lbl.property("full_name") or "")
+
+            drag_btn = row.findChild(QToolButton, "setlistDrag")
+            edit_btn = row.findChild(QToolButton, "setlistEdit")
+            remove_btn = row.findChild(QToolButton, "setlistRemove")
+            icons_w = 0
+            for b in (drag_btn, edit_btn, remove_btn):
+                if b:
+                    icons_w += b.width()
+
+            # Row margins/spacings reserve.
+            avail = max(40, vpw - icons_w - 56)
+            fm = title_lbl.fontMetrics()
+            title_lbl.setText(fm.elidedText(full, Qt.ElideRight, avail))
+            title_lbl.setToolTip(full)
+            row.setToolTip(full)
+
     def _selected_path_for_preview(self) -> Optional[Path]:
-        """Return selected song Path from either playlist or library list."""
-        pl_items = self.maint_playlist_list.selectedItems()
-        if pl_items:
-            return Path(pl_items[0].data(Qt.UserRole))
-        lib_items = self.maint_library_list.selectedItems()
-        if lib_items:
-            return Path(lib_items[0].data(Qt.UserRole))
-        return None
+        return selected_path_for_preview(self.maint_playlist_list, self.maint_library_list)
 
     
     def _sync_active_song_to_path(self, path: Path) -> None:
-            """Sync the active on-stage song to the given path if it's in the current playable list."""
-            self._refresh_song_list()
-            if not self.song_files:
-                return
-            try:
-                target = path.resolve()
-            except Exception:
-                target = path
-            idx = None
-            for i, p in enumerate(self.song_files):
-                try:
-                    if p.resolve() == target:
-                        idx = i
-                        break
-                except Exception:
-                    if p == path:
-                        idx = i
-                        break
-            if idx is None:
-                return
-            if idx != self.song_idx:
-                self.load_song_by_index(idx)
+            sync_active_song_to_path(
+                path=path,
+                refresh_song_list=self._refresh_song_list,
+                get_song_files=lambda: self.song_files,
+                get_song_idx=lambda: self.song_idx,
+                load_song_by_index=self.load_song_by_index,
+            )
 
 
     def _preview_song_in_maintenance(self, path: Path) -> None:
@@ -628,12 +890,19 @@ class StageProWindow(QMainWindow):
         try:
             song = parse_chordpro(text)
             chunks = song_to_chunks(song)
-            # Use a lightweight preview size (avoid needing the onstage graphics view)
-            w = 900
-            h = 1200
+            self._apply_maintenance_preview_geometry()
+            w, h = self._maintenance_preview_doc_size()
             eff_cfg = self._effective_cfg()
             pages = paginate_to_fit(eff_cfg, song, path.name, chunks, w, h)
-            self.maint_preview.setHtml(pages[0] if pages else self._welcome_html())
+            if pages:
+                from .ui_playback import inject_pinned_footer
+                page_html = pages[0]
+                _, h_doc = self._maintenance_preview_doc_size()
+                page_html = inject_pinned_footer(page_html, 1, len(pages), h_doc)
+                self.maint_preview.setHtml(page_html)
+            else:
+                self.maint_preview.setHtml(self._welcome_html())
+            self._update_preview_mode_badge(w, h)
             missing = []
             if not song.meta.get("title") and not song.meta.get("t"):
                 missing.append("title")
@@ -646,6 +915,41 @@ class StageProWindow(QMainWindow):
         except Exception as e:
             self.maint_preview.setPlainText(text)
             self.maint_status.setText(f"Selected: {path.name} (parse error: {e})")
+
+    def _maintenance_preview_doc_size(self) -> tuple[int, int]:
+        canvas = getattr(self, "maint_preview_canvas", None)
+        if canvas is not None:
+            avail_w = max(320, int(canvas.width()) - 12)
+            avail_h = max(320, int(canvas.height()) - 12)
+        else:
+            vp = self.maint_preview.viewport().size()
+            avail_w = max(320, int(vp.width()) - 24)
+            avail_h = max(320, int(vp.height()) - 24)
+
+        # Maintenance preview follows preference orientation only.
+        # Rotation degrees are intentionally ignored here so users see
+        # a true portrait/landscape content layout preview.
+        if self._is_portrait():
+            # Portrait: use 100% available height, derive width at 9:16.
+            h = avail_h
+            w = int(h * (9 / 16))
+        else:
+            # Landscape: use 100% available width, derive height at 16:9.
+            w = avail_w
+            h = int(w * (9 / 16))
+        return max(320, w), max(320, h)
+
+    def _apply_maintenance_preview_geometry(self) -> None:
+        if not hasattr(self, "maint_preview"):
+            return
+        w, h = self._maintenance_preview_doc_size()
+        self.maint_preview.setFixedSize(w, h)
+        self._update_preview_mode_badge(w, h)
+
+    def _update_preview_mode_badge(self, w: int, h: int) -> None:
+        orientation = "Portrait" if self._is_portrait() else "Landscape"
+        fit_mode = self._fit_mode().capitalize()
+        self.lbl_preview_mode.setText(f"{orientation} • {fit_mode} • {w}×{h}")
 
         # ---------- Local editing in Maintenance ----------
 
@@ -739,419 +1043,122 @@ class StageProWindow(QMainWindow):
         self._preview_song_in_maintenance(edit_target)
 
     def _song_editor_dialog(self, title: str, initial_text: str, info_path: Path, is_copy: bool) -> QDialog:
-        dlg = QDialog(self)
-        dlg.setWindowTitle(title)
-        dlg.setModal(True)
-
-        # --- Tag buttons row --------------------------------------------------------
-        tag_row = QHBoxLayout()
-        tag_row.setContentsMargins(0, 0, 0, 0)
-
-        def _btn(label: str, on_click):
-            b = QPushButton(label, dlg)
-            b.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-            b.clicked.connect(on_click)
-            return b
-
-        # Title / Artist
-        tag_row.addWidget(_btn("Title", lambda: (_ensure_header_top(),
-            _insert_text("{title: TITLE}\n", "TITLE"))))
-
-        # In ChordPro, "artist" is commonly stored in {subtitle: ...}
-        tag_row.addWidget(_btn("Artist", lambda: (_ensure_header_top(),
-            _insert_text("{subtitle: ARTIST}\n", "ARTIST"))))
-
-        # Tempo / Key
-        tag_row.addWidget(_btn("Tempo", lambda: (_ensure_header_top(),
-            _insert_text("{tempo: 120}\n", "120"))))
-
-        tag_row.addWidget(_btn("Key", lambda: (_ensure_header_top(),
-            _insert_text("{key: Am}\n", "Am"))))
-
-        # Notes (comment meta)
-        tag_row.addWidget(_btn("Notes", lambda: _insert_text("{comment: NOTES}\n", "NOTES")))
-
-        # Chords helper (inserts a starter chord line; user can edit)
-        tag_row.addWidget(_btn("Chords line", lambda: _insert_text("[Am] [F] [C] [G]\n")))
-
-        # Section blocks (wrap selection if selected)
-        tag_row.addWidget(_btn("Verse", lambda: _insert_text(
-            "{start_of_verse}\n{sel}\n{end_of_verse}\n\n" if editor.textCursor().hasSelection()
-            else "{start_of_verse}\nLYRICS...\n{end_of_verse}\n\n",
-            "LYRICS..."
-        )))
-
-        tag_row.addWidget(_btn("Chorus", lambda: _insert_text(
-            "{start_of_chorus}\n{sel}\n{end_of_chorus}\n\n" if editor.textCursor().hasSelection()
-            else "{start_of_chorus}\nLYRICS...\n{end_of_chorus}\n\n",
-            "LYRICS..."
-        )))
-
-        tag_row.addWidget(_btn("Bridge", lambda: _insert_text(
-            "{start_of_bridge}\n{sel}\n{end_of_bridge}\n\n" if editor.textCursor().hasSelection()
-            else "{start_of_bridge}\nLYRICS...\n{end_of_bridge}\n\n",
-            "LYRICS..."
-        )))
-
-        tag_row.addStretch(1)
-
-        # Determine which screen the dialog should appear on
-        screen = QGuiApplication.screenAt(QCursor.pos())
-        if screen is None:
-            screen = QGuiApplication.primaryScreen()
-
-        screen_geom = screen.availableGeometry()
-
-        # Calculate desired size
-        width = int(screen_geom.width() * 0.50)
-        height = int(screen_geom.height() * 0.75)
-
-        # Center the dialog on that screen
-        x = screen_geom.x() + (screen_geom.width() - width) // 2
-        y = screen_geom.y() + (screen_geom.height() - height) // 2
-
-        dlg.setGeometry(QRect(x, y, width, height))
-
-
-        # Remember focus so we can restore it after closing.
-        prev_focus = QApplication.focusWidget()
-
-        layout = QVBoxLayout(dlg)
-
-        info = QLabel(dlg)
-        if is_copy:
-            info.setText(
-                "Editing a local copy.\n"
-                f"Save target: {info_path}\n\n"
-                "Tip: your library copy stays unchanged."
-            )
-        else:
-            info.setText(f"Save target: {info_path}")
-        info.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        layout.addWidget(info)
-
-        editor = QTextEdit(dlg)
-        editor.setPlainText(initial_text)
-        editor.setLineWrapMode(QTextEdit.NoWrap)
-        editor.setFocusPolicy(Qt.StrongFocus)        
-        layout.addLayout(tag_row)
-        layout.addWidget(editor, 1)
-
-        def _insert_text(snippet: str, select_placeholder: str | None = None) -> None:
-            cur = editor.textCursor()
-
-            # If user has selected text and the snippet contains "{sel}", wrap it.
-            if cur.hasSelection() and "{sel}" in snippet:
-                selected = cur.selectedText()
-                # selectedText() uses U+2029 for line breaks; normalize back to \n
-                selected = selected.replace("\u2029", "\n")
-                snippet_to_insert = snippet.replace("{sel}", selected)
-            else:
-                snippet_to_insert = snippet
-
-            cur.beginEditBlock()
-            cur.insertText(snippet_to_insert)
-            cur.endEditBlock()
-
-            # Optionally select a placeholder so user can type immediately
-            if select_placeholder:
-                doc = editor.document()
-                full = doc.toPlainText()
-                start = full.rfind(select_placeholder)
-                if start != -1:
-                    cur = editor.textCursor()
-                    cur.setPosition(start)
-                    cur.setPosition(start + len(select_placeholder), QTextCursor.KeepAnchor)
-                    editor.setTextCursor(cur)
-
-            editor.setFocus(Qt.OtherFocusReason)
-
-        def _ensure_header_top() -> None:
-            """If cursor isn't at top, jump to top before inserting title/artist metadata."""
-            cur = editor.textCursor()
-            if cur.position() != 0:
-                cur.setPosition(0)
-                editor.setTextCursor(cur)
-
-
-
-        # layout.addLayout(tag_row)
-        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel, parent=dlg)
-        buttons.accepted.connect(dlg.accept)
-        buttons.rejected.connect(dlg.reject)
-        layout.addWidget(buttons)
-
-        # Make tab order predictable: editor -> Save -> Cancel -> editor
-        save_btn = buttons.button(QDialogButtonBox.Save)
-        cancel_btn = buttons.button(QDialogButtonBox.Cancel)
-        if save_btn and cancel_btn:
-            dlg.setTabOrder(editor, save_btn)
-            dlg.setTabOrder(save_btn, cancel_btn)
-            dlg.setTabOrder(cancel_btn, editor)
-
-        # Dialog-local shortcuts only
-        # Ctrl+S saves (accepts dialog)
-        if save_btn:
-            save_btn.setDefault(False)   # don’t steal Enter
-            save_btn.setAutoDefault(False)
-            save_sc = QShortcut(QKeySequence.Save, dlg)
-            save_sc.setContext(Qt.WidgetWithChildrenShortcut)
-            save_sc.activated.connect(dlg.accept)
-
-        # Esc cancels (rejects dialog) — QDialog usually does this already, but make it explicit.
-        esc_sc = QShortcut(QKeySequence.Cancel, dlg)
-        esc_sc.setContext(Qt.WidgetWithChildrenShortcut)
-        esc_sc.activated.connect(dlg.reject)
-
-        # Focus editor reliably after show (important on some platforms/window managers)
-        dlg.setFocusProxy(editor)
-        QTimer.singleShot(0, editor.setFocus)
-
-        # Restore prior focus when done
-        def _restore_focus(_result: int):
-            if prev_focus is not None:
-                QTimer.singleShot(0, lambda: prev_focus.setFocus(Qt.OtherFocusReason))
-        dlg.finished.connect(_restore_focus)
-
-        dlg._editor = editor
-        return dlg
+        return build_song_editor_dialog(
+            parent=self,
+            title=title,
+            initial_text=initial_text,
+            info_path=info_path,
+            is_copy=is_copy,
+        )
 
     def _move_selected_item(self, delta: int) -> None:
-        row = self.maint_playlist_list.currentRow()
-        if row < 0:
-            return
-        new_row = row + int(delta)
-        if new_row < 0 or new_row >= self.maint_playlist_list.count():
-            return
-        it = self.maint_playlist_list.takeItem(row)
-        self.maint_playlist_list.insertItem(new_row, it)
-        self.maint_playlist_list.setCurrentRow(new_row)
-        self._persist_current_playlist_order()
+        move_selected_item(self.maint_playlist_list, delta, self._persist_current_playlist_order)
 
     def _persist_current_playlist_order(self) -> None:
-        pid = self.playlists.active_playlist_id
-        if not pid:
-            return
-        items = []
-        for i in range(self.maint_playlist_list.count()):
-            it = self.maint_playlist_list.item(i)
-            items.append(Path(it.data(Qt.UserRole)).name)
-        self.playlists.set_items(pid, items)
+        persist_current_playlist_order(self.maint_playlist_list, self.playlists.active_playlist_id, self.playlists.set_items)
 
     def _add_selected_library_to_playlist(self) -> None:
-        item = self.maint_library_list.currentItem()
-        if not item:
-            return
-        filename = Path(item.data(Qt.UserRole)).name
-        self._add_filename_to_active_playlist(filename)
-        self._refresh_maintenance_list(preserve_selection=False)
+        add_selected_library_to_playlist(
+            self.maint_library_list,
+            self._add_filename_to_active_playlist,
+            self._refresh_maintenance_list,
+        )
+
+    def _add_checked_library_to_playlist(self) -> None:
+        added = 0
+        for i in range(self.maint_library_list.count()):
+            it = self.maint_library_list.item(i)
+            if not it or it.checkState() != Qt.Checked:
+                continue
+            if not (it.flags() & Qt.ItemIsEnabled):
+                continue
+            self._add_filename_to_active_playlist(Path(it.data(Qt.UserRole)).name)
+            added += 1
+        if added:
+            self._refresh_maintenance_list(preserve_selection=False)
+            self.maint_status.setText(f"Added {added} song(s) to setlist")
+
+    def _clear_library_checks(self) -> None:
+        for i in range(self.maint_library_list.count()):
+            it = self.maint_library_list.item(i)
+            if it:
+                it.setCheckState(Qt.Unchecked)
+
+    def _select_all_library_checks(self) -> None:
+        for i in range(self.maint_library_list.count()):
+            it = self.maint_library_list.item(i)
+            if it and (it.flags() & Qt.ItemIsEnabled):
+                it.setCheckState(Qt.Checked)
 
     def _add_filename_to_active_playlist(self, filename: str) -> None:
-        pl = self.playlists.get_active()
-        items = list(pl.items)
-        if filename.lower() in {x.lower() for x in items}:
-            return
-        items.append(filename)
-        self.playlists.set_items(pl.playlist_id, items)
+        add_filename_to_active_playlist(filename, self.playlists.get_active, self.playlists.set_items)
 
     def _remove_selected_from_playlist(self) -> None:
-        pid = self.playlists.active_playlist_id
-        if not pid:
-            return
-        row = self.maint_playlist_list.currentRow()
-        if row < 0:
-            return
-
-        self.playlists.remove_items_by_index(pid, [row])
-        self._refresh_maintenance_list(preserve_selection=False)
-        self._load_first_song_or_welcome()
+        remove_selected_from_playlist(
+            self.playlists.active_playlist_id,
+            self.maint_playlist_list,
+            self.playlists.remove_items_by_index,
+            self._refresh_maintenance_list,
+            self._load_first_song_or_welcome,
+        )
 
     def _on_playlist_changed(self, idx: int) -> None:
-        pid = self.cmb_playlist.currentData()
-        if not pid:
-            return
-        self.playlists.set_active(pid)
-        self._refresh_maintenance_list(preserve_selection=False)
-        self._load_first_song_or_welcome()
+        on_playlist_changed(
+            self.cmb_playlist,
+            self.playlists.set_active,
+            self._refresh_maintenance_list,
+            self._load_first_song_or_welcome,
+        )
 
     def _pl_new(self) -> None:
-        name, ok = QInputDialog.getText(self, "New Playlist", "Playlist name:")
-        if not ok:
-            return
-        self.playlists.create_playlist(name=name.strip() or "New Playlist", items=[])
-        self._refresh_maintenance_list(preserve_selection=False)
+        pl_new(self, self.playlists.create_playlist, self._refresh_maintenance_list)
 
     def _pl_rename(self) -> None:
-        pl = self.playlists.get_active()
-        name, ok = QInputDialog.getText(self, "Rename Playlist", "New name:", text=pl.name)
-        if not ok:
-            return
-        self.playlists.rename_playlist(pl.playlist_id, name.strip() or pl.name)
-        self._refresh_maintenance_list(preserve_selection=True)
+        pl_rename(self, self.playlists.get_active, self.playlists.rename_playlist, self._refresh_maintenance_list)
 
     def _pl_duplicate(self) -> None:
-        pl = self.playlists.get_active()
-        self.playlists.duplicate_playlist(pl.playlist_id)
-        self._refresh_maintenance_list(preserve_selection=False)
+        pl_duplicate(self.playlists.get_active, self.playlists.duplicate_playlist, self._refresh_maintenance_list)
 
     def _pl_delete(self) -> None:
-        pl = self.playlists.get_active()
-        resp = QMessageBox.question(
+        pl_delete(
             self,
-            "Delete Playlist",
-            f"Delete playlist '{pl.name}'?\n\nThis will NOT delete any song files.",
-            QMessageBox.Yes | QMessageBox.No,
+            self.playlists.get_active,
+            self.playlists.delete_playlist,
+            self._refresh_maintenance_list,
+            self._load_first_song_or_welcome,
         )
-        if resp != QMessageBox.Yes:
-            return
-        self.playlists.delete_playlist(pl.playlist_id)
-        self._refresh_maintenance_list(preserve_selection=False)
-        self._load_first_song_or_welcome()
 
 
     def _save_setlist_from_ui(self) -> None:
-        setlist_name = (self.cfg.get("setlist", {}) or {}).get("filename", "setlist.txt")
-        lines = []
-        for i in range(self.maint_playlist_list.count()):
-            it = self.maint_playlist_list.item(i)
-            # store filenames (not absolute paths)
-            lines.append(Path(it.data(Qt.UserRole)).name)
-        p = self.songs_dir / setlist_name
-        p.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
-        self.maint_status.setText(f"Saved setlist: {p}")
-        self._refresh_song_list()
+        save_setlist_from_ui(
+            self.cfg,
+            self.maint_playlist_list,
+            self.songs_dir,
+            self.maint_status,
+            self._refresh_song_list,
+        )
 
     def _on_import_clicked(self) -> None:
-        files, _ = QFileDialog.getOpenFileNames(
-            self,
-            "Import songs",
-            str(self.songs_dir),
-            "Songs (*.pro *.cho *.chopro *.txt);;All files (*)",
+        on_import_clicked(
+            parent=self,
+            songs_dir=self.songs_dir,
+            add_filename_to_active_playlist_callback=self._add_filename_to_active_playlist,
+            refresh_maintenance_list_callback=self._refresh_maintenance_list,
+            import_user_file_to_chordpro=import_user_file_to_chordpro,
+            choose_destination_path=choose_destination_path,
+            import_error_type=ImportErrorWithHint,
         )
-        if not files:
-            return
-
-        imported = 0
-        warnings: List[str] = []
-        for fp in files:
-            src = Path(fp)
-
-            # If the selected file is already in the songs folder, do NOT import/copy it.
-            # Just add it to the active playlist.
-            try:
-                if src.resolve().parent == self.songs_dir.resolve():
-                    if src.exists() and src.is_file():
-                        self._add_filename_to_active_playlist(src.name)
-                        imported += 1
-                        continue
-            except Exception:
-                pass
-
-            try:
-
-                imp = import_user_file_to_chordpro(src)
-                # choose dest
-                title = imp.title or src.stem
-                artist = imp.artist or "Unknown"
-                dest = choose_destination_path(self.songs_dir, title, artist, ext=".pro")
-                dest.write_text(imp.chordpro_text, encoding="utf-8")
-                imported += 1
-                # add to active playlist (at end)
-                self._add_filename_to_active_playlist(dest.name)
-
-                if not imp.title or not imp.artist:
-                    warnings.append(f"{src.name}: imported, but title/artist missing in directives (you can autofill from MusicBrainz)")
-            except ImportErrorWithHint as e:
-                warnings.append(f"{src.name}: {e}")
-            except Exception as e:
-                warnings.append(f"{src.name}: import failed ({e})")
-
-        self._refresh_maintenance_list(preserve_selection=False)
-        msg = f"Imported {imported} file(s)."
-        if warnings:
-            msg += "\n\n" + "\n".join(warnings[:12])
-            if len(warnings) > 12:
-                msg += f"\n…and {len(warnings) - 12} more."
-        QMessageBox.information(self, "Import", msg)
 
     def _on_mb_autofill_clicked(self) -> None:
-        path = self._selected_path_for_preview()
-        if not path:
-            QMessageBox.information(self, "MusicBrainz", "Select a song first.")
-            return
-        try:
-            text = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            text = path.read_text(encoding="latin-1")
-
-        # Extract title/artist from existing directives if present.
-        title = ""
-        artist = ""
-        for raw in text.splitlines():
-            m = re.match(r"^\s*\{\s*([^}:]+)\s*:\s*([^}]*)\}\s*$", raw, flags=re.IGNORECASE)
-            if not m:
-                continue
-            k = m.group(1).strip().lower()
-            v = m.group(2).strip()
-            if k in {"title", "t"} and not title:
-                title = v
-            if k in {"artist", "a"} and not artist:
-                artist = v
-
-        if not title or not artist:
-            QMessageBox.information(
-                self,
-                "MusicBrainz",
-                "This file is missing a title and/or artist directive.\n\n"
-                "StagePro can search MusicBrainz only when it knows the song title and artist.\n"
-                "Add {title: ...} and {artist: ...} (or re-import using the fallback header format).",
-            )
-            return
-
-        try:
-            hits = self.mb.search_recordings(title=title, artist=artist, limit=12)
-        except Exception as e:
-            QMessageBox.critical(self, "MusicBrainz", f"Search failed: {e}")
-            return
-
-        if not hits:
-            QMessageBox.information(self, "MusicBrainz", "No matches found.")
-            return
-
-        chosen = self._pick_musicbrainz_hit(hits)
-        if not chosen:
-            return
-
-        updates = {}
-        # Fill missing basics (do not overwrite user-specified values)
-        updates.setdefault("title", chosen.title)
-        updates.setdefault("artist", chosen.artist)
-        if chosen.release:
-            updates.setdefault("album", chosen.release)
-        if chosen.date:
-            updates.setdefault("year", chosen.date.split("-")[0])
-
-        # Only apply updates for keys that are currently missing
-        current_meta = {}
-        for raw in text.splitlines():
-            m = re.match(r"^\s*\{\s*([^}:]+)\s*:\s*([^}]*)\}\s*$", raw, flags=re.IGNORECASE)
-            if m:
-                current_meta[m.group(1).strip().lower()] = m.group(2).strip()
-
-        filtered_updates = {k: v for k, v in updates.items() if not current_meta.get(k)}
-        if not filtered_updates:
-            QMessageBox.information(self, "MusicBrainz", "Nothing to autofill — metadata is already present.")
-            return
-
-        new_text, _ = upsert_directives(text, filtered_updates)
-        try:
-            path.write_text(new_text, encoding="utf-8")
-        except Exception as e:
-            QMessageBox.critical(self, "MusicBrainz", f"Failed to save updates: {e}")
-            return
-
-        self.maint_status.setText(f"Autofilled metadata from MusicBrainz for: {path.name}")
-        self._preview_song_in_maintenance(path)
+        on_mb_autofill_clicked(
+            parent=self,
+            selected_path_for_preview_callback=self._selected_path_for_preview,
+            mb_client=self.mb,
+            pick_musicbrainz_hit_callback=self._pick_musicbrainz_hit,
+            upsert_directives=upsert_directives,
+            maint_status=self.maint_status,
+            preview_song_in_maintenance_callback=self._preview_song_in_maintenance,
+        )
 
     def _pick_musicbrainz_hit(self, hits: List[MBRecordingHit]) -> Optional[MBRecordingHit]:
         dlg = QDialog(self)
@@ -1186,56 +1193,25 @@ class StageProWindow(QMainWindow):
     # ---------- Exit combo + paging ----------
 
     def _exit_combo_active(self) -> bool:
-        pg_pair = (Qt.Key_PageUp in self.pressed_keys) and (Qt.Key_PageDown in self.pressed_keys)
-        lr_pair = (Qt.Key_Left in self.pressed_keys) and (Qt.Key_Right in self.pressed_keys)
-        return pg_pair or lr_pair
+        return exit_combo_active(self.pressed_keys)
 
     def _start_or_stop_exit_timer(self):
-        if self._exit_combo_active():
-            if not self.exit_timer.isActive():
-                self.exit_timer.start(self.exit_hold_ms)
-        else:
-            if self.exit_timer.isActive():
-                self.exit_timer.stop()
+        start_or_stop_exit_timer(self.exit_timer, self.exit_hold_ms, self.pressed_keys)
 
     def _exit_if_still_held(self):
-        if self._exit_combo_active():
-            self.close()
+        exit_if_still_held(self.pressed_keys, self.close)
 
     def _maybe_handle_onstage_toggle_combo(self, key: int) -> bool:
-        """Detect a quick 'both footswitch buttons' press.
-
-        Many pedals are configured to emit PageUp/PageDown. We detect a combo
-        when both keys are pressed within a short window.
-        """
-        if key not in (Qt.Key_PageUp, Qt.Key_PageDown, Qt.Key_Left, Qt.Key_Right):
-            return False
-
-        # Don't retrigger until both keys are released.
-        if self._combo_latched:
-            return False
-
-        # Use monotonic time for stable key timing.
-        import time
-        now_ms = int(time.monotonic() * 1000)
-        self._last_pedal_down[key] = now_ms
-
-        # Determine pair
-        if key in (Qt.Key_PageUp, Qt.Key_PageDown):
-            other = Qt.Key_PageDown if key == Qt.Key_PageUp else Qt.Key_PageUp
-        else:
-            other = Qt.Key_Right if key == Qt.Key_Left else Qt.Key_Left
-
-        other_ts = self._last_pedal_down.get(other)
-        if other_ts is None:
-            return False
-
-        if abs(now_ms - other_ts) <= self._combo_window_ms:
+        handled = maybe_handle_onstage_toggle_combo(
+            key=key,
+            combo_latched=self._combo_latched,
+            last_pedal_down=self._last_pedal_down,
+            combo_window_ms=self._combo_window_ms,
+            toggle_mode_callback=self._toggle_mode,
+        )
+        if handled:
             self._combo_latched = True
-            self._toggle_mode()
-            return True
-
-        return False
+        return handled
 
     def eventFilter(self, obj, event):
         modal = QApplication.activeModalWidget()
@@ -1314,9 +1290,60 @@ class StageProWindow(QMainWindow):
     # ---------- UI actions (non-nav) ----------
 
     def _build_actions(self):
+        import_act = QAction("Import Songs…", self)
+        import_act.setShortcut("Ctrl+O")
+        import_act.triggered.connect(self._on_import_clicked)
+
+        export_setlist_act = QAction("Export Setlist", self)
+        export_setlist_act.triggered.connect(self._save_setlist_from_ui)
+
         pref_act = QAction("Preferences…", self)
         pref_act.setShortcut("Ctrl+,")
         pref_act.triggered.connect(self.open_preferences)
+
+        edit_song_act = QAction("Edit Selected Song…", self)
+        edit_song_act.setShortcut("Ctrl+E")
+        edit_song_act.triggered.connect(self._on_edit_song_clicked)
+
+        remove_from_setlist_act = QAction("Remove from Setlist", self)
+        remove_from_setlist_act.setShortcut("Delete")
+        remove_from_setlist_act.triggered.connect(self._remove_selected_from_playlist)
+
+        add_selected_from_library_act = QAction("Add Selected Library Song", self)
+        add_selected_from_library_act.triggered.connect(self._add_selected_library_to_playlist)
+
+        add_checked_from_library_act = QAction("Add Checked Library Songs", self)
+        add_checked_from_library_act.triggered.connect(self._add_checked_library_to_playlist)
+
+        clear_library_checks_act = QAction("Clear Library Checks", self)
+        clear_library_checks_act.triggered.connect(self._clear_library_checks)
+
+        mb_act = QAction("Autofill from MusicBrainz…", self)
+        mb_act.triggered.connect(self._on_mb_autofill_clicked)
+
+        setlist_new_act = QAction("New Setlist", self)
+        setlist_new_act.triggered.connect(self._pl_new)
+
+        setlist_rename_act = QAction("Rename Setlist", self)
+        setlist_rename_act.triggered.connect(self._pl_rename)
+
+        setlist_dup_act = QAction("Duplicate Setlist", self)
+        setlist_dup_act.triggered.connect(self._pl_duplicate)
+
+        setlist_delete_act = QAction("Delete Setlist", self)
+        setlist_delete_act.triggered.connect(self._pl_delete)
+
+        move_song_up_act = QAction("Move Song Up", self)
+        move_song_up_act.setShortcut("Ctrl+Up")
+        move_song_up_act.triggered.connect(lambda: self._move_selected_item(-1))
+
+        move_song_down_act = QAction("Move Song Down", self)
+        move_song_down_act.setShortcut("Ctrl+Down")
+        move_song_down_act.triggered.connect(lambda: self._move_selected_item(+1))
+
+        toggle_mode_act = QAction("Toggle On-Stage Mode", self)
+        toggle_mode_act.setShortcut("Ctrl+F")
+        toggle_mode_act.triggered.connect(self._toggle_mode)
 
         libraries_act = QAction("Libraries…", self)
         libraries_act.triggered.connect(self.open_libraries_manager)
@@ -1327,11 +1354,37 @@ class StageProWindow(QMainWindow):
 
         menu = self.menuBar()
 
+        file_menu = menu.addMenu("&File")
+        file_menu.addAction(import_act)
+        file_menu.addAction(export_setlist_act)
+        file_menu.addSeparator()
+        file_menu.addAction(quit_act)
+
+        edit_menu = menu.addMenu("&Edit")
+        edit_menu.addAction(edit_song_act)
+        edit_menu.addAction(remove_from_setlist_act)
+        edit_menu.addSeparator()
+        edit_menu.addAction(add_selected_from_library_act)
+        edit_menu.addAction(add_checked_from_library_act)
+        edit_menu.addAction(clear_library_checks_act)
+        edit_menu.addSeparator()
+        edit_menu.addAction(mb_act)
+        edit_menu.addAction(pref_act)
+
+        setlist_menu = menu.addMenu("&Setlist")
+        setlist_menu.addAction(setlist_new_act)
+        setlist_menu.addAction(setlist_rename_act)
+        setlist_menu.addAction(setlist_dup_act)
+        setlist_menu.addAction(setlist_delete_act)
+        setlist_menu.addSeparator()
+        setlist_menu.addAction(move_song_up_act)
+        setlist_menu.addAction(move_song_down_act)
+
+        view_menu = menu.addMenu("&View")
+        view_menu.addAction(toggle_mode_act)
+
         tools_menu = menu.addMenu("&Tools")
-        tools_menu.addAction(pref_act)
         tools_menu.addAction(libraries_act)
-        tools_menu.addSeparator()
-        tools_menu.addAction(quit_act)
 
     def open_libraries_manager(self) -> None:
         if getattr(self, "_libraries_dialog", None) is None:
@@ -1422,78 +1475,61 @@ class StageProWindow(QMainWindow):
             QMessageBox.critical(self, "StagePro Error", f"Failed to open/parse:\n{path}\n\n{e}")
 
     def _available_doc_size(self) -> tuple[int, int]:
-        # The QTextBrowser is explicitly sized to the viewport (swapped in portrait), so use that.
-        w = max(200, int(self.viewer.width()))
-        h = max(200, int(self.viewer.height()))
-        return w, h
+        return available_doc_size(self.viewer)
 
     def _repaginate_and_render(self):
-        if not self.song:
-            return
-        w, h = self._available_doc_size()
-        filename = self.song_files[self.song_idx].name if self.song_files else "Untitled"
-        chunks = song_to_chunks(self.song)
-        #cfg = self.effective_cfg()
-        eff_cfg = self._effective_cfg()
-        self.pages = paginate_to_fit(eff_cfg, self.song, filename, chunks, w, h)
-        self.page_index = max(0, min(self.page_index, len(self.pages) - 1))
-        self.render()
+        pages, page_index = repaginate_and_render(
+            song=self.song,
+            song_files=self.song_files,
+            song_idx=self.song_idx,
+            page_index=self.page_index,
+            effective_cfg=self._effective_cfg,
+            viewer=self.viewer,
+        )
+        if self.song:
+            self.pages = pages
+            self.page_index = page_index
+            self.render()
 
     def render(self):
-        if self.blackout:
-            eff = self._effective_cfg()
-            colors = eff.get("colors", {}) or {}
-            bg = colors.get("background") or colors.get("bg") or "#000000"
-            self.viewer.setHtml(f"<html><body style='background:{bg};'></body></html>")
-            return
-        if not self.song:
-            self.viewer.setHtml(self._welcome_html())
-            return
-        if not self.pages:
+        rendered = render_page(
+            blackout=self.blackout,
+            song=self.song,
+            pages=self.pages,
+            page_index=self.page_index,
+            effective_cfg=self._effective_cfg,
+            welcome_html=self._welcome_html,
+            viewer=self.viewer,
+        )
+        if not rendered:
             self._repaginate_and_render()
             if not self.pages:
                 self.viewer.setHtml(self._welcome_html())
                 return
-        self.viewer.setHtml(self.pages[self.page_index])
+            self.viewer.setHtml(self.pages[self.page_index])
 
     # ---------- Controls ----------
 
     def next_page(self):
-        if not self.pages:
-            return
-        if self.page_index < len(self.pages) - 1:
-            self.page_index += 1
-            self.render()
-        else:
-            self.next_song()
+        self.page_index = playback_next_page(self.pages, self.page_index, self.render, self.next_song)
 
     def prev_page(self):
-        if not self.pages:
-            return
-        if self.page_index > 0:
-            self.page_index -= 1
-            self.render()
-        else:
-            self.prev_song(go_to_last_page=True)
+        self.page_index = playback_prev_page(self.pages, self.page_index, self.render, self.prev_song)
 
     def next_song(self):
-        if not self.song_files:
-            return
-        if self.song_idx < len(self.song_files) - 1:
-            self.load_song_by_index(self.song_idx + 1)
-        else:
-            self.render()
+        playback_next_song(self.song_files, self.song_idx, self.load_song_by_index, self.render)
 
     def prev_song(self, go_to_last_page: bool = False):
-        if not self.song_files:
-            return
-        if self.song_idx > 0:
-            self.load_song_by_index(self.song_idx - 1)
-            if go_to_last_page and self.pages:
-                self.page_index = max(0, len(self.pages) - 1)
-                self.render()
-        else:
-            self.render()
+        new_page_index = playback_prev_song(
+            self.song_files,
+            self.song_idx,
+            self.pages,
+            self.load_song_by_index,
+            self.render,
+            go_to_last_page=go_to_last_page,
+        )
+        if new_page_index is not None:
+            self.page_index = new_page_index
 
     def reload_config(self):
         try:

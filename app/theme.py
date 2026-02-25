@@ -27,6 +27,102 @@ DEFAULT_COLORS = {
     "directive.meta": "#888888",
 }
 
+DEFAULT_STYLES = {
+    "section.verse": [],
+    "section.chorus": [],
+    "section.comment": ["italic"],
+    "directive.title": ["bold"],
+    "directive.subtitle": [],
+    "directive.meta": [],
+}
+
+_COLOR_ALIASES = {
+    "text": ["lyrics"],
+    "verse_text": ["section.verse", "lyrics", "text"],
+    "chorus_text": ["section.chorus", "lyrics", "text"],
+    "chorus_border": ["section.chorus_border", "section.chorus"],
+    "comment": ["section.comment"],
+    "title": ["directive.title"],
+    "subtitle": ["directive.subtitle"],
+    "meta": ["directive.meta"],
+}
+
+_STYLE_ALIASES = {
+    "section.verse": ["verse", "verse_text"],
+    "section.chorus": ["chorus", "chorus_text"],
+    "section.comment": ["comment"],
+    "directive.title": ["title"],
+    "directive.subtitle": ["subtitle"],
+    "directive.meta": ["meta"],
+}
+
+
+def resolve_theme_path(base_dir: Path, cfg: dict) -> Path | None:
+    theme_ref = (cfg.get("theme") or cfg.get("theme_path") or "").strip()
+    if not theme_ref:
+        return None
+
+    p = Path(theme_ref)
+    if not p.is_absolute():
+        p = Path(base_dir) / p
+
+    if not p.exists():
+        return None
+    return p
+
+
+def load_theme_data(base_dir: Path, cfg: dict) -> dict:
+    p = resolve_theme_path(base_dir, cfg)
+    if not p:
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        # Theme errors should never crash StagePro.
+        return {}
+
+
+def _normalize_colors(colors: dict) -> dict:
+    out = dict(colors or {})
+    for canonical, keys in _COLOR_ALIASES.items():
+        if out.get(canonical):
+            continue
+        for key in keys:
+            value = out.get(key)
+            if value:
+                out[canonical] = value
+                break
+    return out
+
+
+def _normalize_styles(styles: dict) -> dict:
+    out = dict(DEFAULT_STYLES)
+    out.update(dict(styles or {}))
+    for canonical, keys in _STYLE_ALIASES.items():
+        if canonical in out:
+            continue
+        for key in keys:
+            if key in out:
+                out[canonical] = out[key]
+                break
+    return out
+
+
+def resolve_theme_tokens(base_dir: Path, cfg: dict) -> dict:
+    """
+    Central theme contract used by rendering.
+
+    Returns normalized theme payload:
+      {
+        "colors": { ... },
+        "styles": { ... }
+      }
+    """
+    data = load_theme_data(base_dir, cfg)
+    colors = _normalize_colors(data.get("colors") or {})
+    styles = _normalize_styles(data.get("styles") or {})
+    return {"colors": colors, "styles": styles}
+
 
 class Theme:
     def __init__(self, data: dict | None = None):
