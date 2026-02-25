@@ -75,6 +75,7 @@ def render_page(
         return True
     if not pages:
         return False
+    page_index = max(0, min(page_index, len(pages) - 1))
     html = pages[page_index]
     _, h = available_doc_size(viewer)
     html = inject_pinned_footer(html, page_index + 1, len(pages), h)
@@ -82,25 +83,27 @@ def render_page(
     return True
 
 
-def next_page(pages: list[str], page_index: int, render_callback, next_song_callback) -> int:
+def next_page(pages: list[str], page_index: int, render_callback, next_song_callback) -> int | None:
     if not pages:
         return page_index
     if page_index < len(pages) - 1:
         page_index += 1
-        render_callback()
     else:
         next_song_callback()
+        # Boundary transition is callback-owned; caller must not overwrite with stale local index.
+        return None
     return page_index
 
 
-def prev_page(pages: list[str], page_index: int, render_callback, prev_song_callback) -> int:
+def prev_page(pages: list[str], page_index: int, render_callback, prev_song_callback) -> int | None:
     if not pages:
         return page_index
     if page_index > 0:
         page_index -= 1
-        render_callback()
     else:
-        prev_song_callback(go_to_last_page=True)
+        prev_song_callback()
+        # Boundary transition is callback-owned; caller must not overwrite with stale local index.
+        return None
     return page_index
 
 
@@ -113,15 +116,11 @@ def next_song(song_files, song_idx: int, load_song_by_index_callback, render_cal
         render_callback()
 
 
-def prev_song(song_files, song_idx: int, pages: list[str], load_song_by_index_callback, render_callback, go_to_last_page: bool = False):
+def prev_song(song_files, song_idx: int, pages: list[str], load_song_by_index_callback, render_callback):
     if not song_files:
         return None
     if song_idx > 0:
         load_song_by_index_callback(song_idx - 1)
-        if go_to_last_page and pages:
-            new_page_index = max(0, len(pages) - 1)
-            render_callback()
-            return new_page_index
     else:
         render_callback()
     return None

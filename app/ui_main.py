@@ -62,6 +62,7 @@ from .importers import (
     choose_destination_path,
 )
 from .musicbrainz import MusicBrainzClient, MBRecordingHit
+from .ultimate_client import UltimateGuitarClient, UGSearchHit
 from .config import get_user_config_dir
 from .paths import overrides_dir
 from .libraries.model import load_libraries_config
@@ -115,6 +116,7 @@ from .ui_playlist_ops import (
 from .ui_imports import (
     on_import_clicked,
     on_mb_autofill_clicked,
+    on_ug_search_import_clicked,
 )
 
 class StageProWindow(QMainWindow):
@@ -199,6 +201,7 @@ class StageProWindow(QMainWindow):
         self.btn_move_up = QPushButton("▲")
         self.btn_move_down = QPushButton("▼")
         self.btn_mb_autofill = QPushButton("Autofill from MusicBrainz…")
+        self.btn_ug_search = QPushButton("Search Ultimate Guitar…")
         self.maint_status = QLabel("")
         self.maint_status.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.cmb_playlist = QComboBox()
@@ -239,6 +242,10 @@ class StageProWindow(QMainWindow):
         # MusicBrainz client (metadata-only)
         cache_path = get_user_config_dir() / "musicbrainz_cache.json"
         self.mb = MusicBrainzClient(cache_path=cache_path)
+        ug_cfg = (self.cfg.get("integrations", {}) or {}).get("ultimate_guitar", {}) or {}
+        self.ug_enabled = bool(ug_cfg.get("enabled", False))
+        timeout_s = ug_cfg.get("timeout_s", 8.0)
+        self.ug = UltimateGuitarClient(timeout_s=float(timeout_s))
 
         self._build_actions()
         app_icon = self.base_dir / "assets" / "stagepro.png"
@@ -548,6 +555,7 @@ class StageProWindow(QMainWindow):
         self.btn_move_down.clicked.connect(lambda: self._move_selected_item(+1))
         self.btn_add_to_set.clicked.connect(self._add_selected_library_to_playlist)
         self.btn_mb_autofill.clicked.connect(self._on_mb_autofill_clicked)
+        self.btn_ug_search.clicked.connect(self._on_ug_search_import_clicked)
         self.cmb_playlist.currentIndexChanged.connect(self._on_playlist_changed)
         self.btn_pl_new.clicked.connect(self._pl_new)
         self.btn_pl_rename.clicked.connect(self._pl_rename)
@@ -559,6 +567,7 @@ class StageProWindow(QMainWindow):
         # Tooltips for clarity
         self.btn_edit_song.setToolTip("Edit the selected song (library songs will be copied locally first)")
         self.btn_mb_autofill.setToolTip("Search MusicBrainz to fill missing metadata for the selected song")
+        self.btn_ug_search.setToolTip("Ctrl+G: Search Ultimate Guitar, preview ChordPro, then import the previewed tab")
         self.btn_add_to_set.setToolTip("Add selected Library song to the current playlist (does not copy files)")
         self.btn_remove_from_set.setToolTip("Remove selected song from the current playlist (does not delete the file)")
         self.btn_save_setlist.setToolTip("Export current playlist order to setlist.txt (legacy compatibility)")
@@ -573,6 +582,7 @@ class StageProWindow(QMainWindow):
             self.btn_move_up,
             self.btn_move_down,
             self.btn_mb_autofill,
+            self.btn_ug_search,
             self.btn_pl_new,
             self.btn_pl_rename,
             self.btn_pl_dup,
@@ -1160,6 +1170,46 @@ class StageProWindow(QMainWindow):
             preview_song_in_maintenance_callback=self._preview_song_in_maintenance,
         )
 
+    def _on_ug_search_import_clicked(self) -> None:
+        on_ug_search_import_clicked(
+            parent=self,
+            songs_dir=self.songs_dir,
+            add_filename_to_active_playlist_callback=self._add_filename_to_active_playlist,
+            refresh_maintenance_list_callback=self._refresh_maintenance_list,
+            choose_destination_path=choose_destination_path,
+            ug_enabled=self.ug_enabled,
+            ug_client=self.ug,
+        )
+
+    def _pick_ug_hit(self, hits: List[UGSearchHit]) -> Optional[UGSearchHit]:
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Select Ultimate Guitar result")
+        layout = QVBoxLayout(dlg)
+        layout.addWidget(QLabel("Pick the best Ultimate Guitar match:"))
+
+        lst = QListWidget(dlg)
+        for h in hits:
+            suffix = ""
+            if h.tab_type:
+                suffix += f" — {h.tab_type}"
+            if h.rating is not None:
+                suffix += f" (rating {h.rating:.1f})"
+            it = QListWidgetItem(f"{h.title} — {h.artist}{suffix}")
+            it.setData(Qt.UserRole, h)
+            lst.addItem(it)
+        lst.setCurrentRow(0)
+        layout.addWidget(lst, 1)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        layout.addWidget(buttons)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+
+        if dlg.exec() != QDialog.Accepted:
+            return None
+        sel = lst.selectedItems()
+        return sel[0].data(Qt.UserRole) if sel else None
+
     def _pick_musicbrainz_hit(self, hits: List[MBRecordingHit]) -> Optional[MBRecordingHit]:
         dlg = QDialog(self)
         dlg.setWindowTitle("Select a match")
@@ -1321,6 +1371,10 @@ class StageProWindow(QMainWindow):
         mb_act = QAction("Autofill from MusicBrainz…", self)
         mb_act.triggered.connect(self._on_mb_autofill_clicked)
 
+        ug_act = QAction("Search Ultimate Guitar…", self)
+        ug_act.setShortcut("Ctrl+G")
+        ug_act.triggered.connect(self._on_ug_search_import_clicked)
+
         setlist_new_act = QAction("New Setlist", self)
         setlist_new_act.triggered.connect(self._pl_new)
 
@@ -1369,6 +1423,7 @@ class StageProWindow(QMainWindow):
         edit_menu.addAction(clear_library_checks_act)
         edit_menu.addSeparator()
         edit_menu.addAction(mb_act)
+        edit_menu.addAction(ug_act)
         edit_menu.addAction(pref_act)
 
         setlist_menu = menu.addMenu("&Setlist")
@@ -1506,30 +1561,34 @@ class StageProWindow(QMainWindow):
             if not self.pages:
                 self.viewer.setHtml(self._welcome_html())
                 return
+            self.page_index = max(0, min(self.page_index, len(self.pages) - 1))
             self.viewer.setHtml(self.pages[self.page_index])
 
     # ---------- Controls ----------
 
     def next_page(self):
-        self.page_index = playback_next_page(self.pages, self.page_index, self.render, self.next_song)
+        new_page_index = playback_next_page(self.pages, self.page_index, self.render, self.next_song)
+        if new_page_index is not None:
+            self.page_index = new_page_index
+            self.render()
 
     def prev_page(self):
-        self.page_index = playback_prev_page(self.pages, self.page_index, self.render, self.prev_song)
+        new_page_index = playback_prev_page(self.pages, self.page_index, self.render, self.prev_song)
+        if new_page_index is not None:
+            self.page_index = new_page_index
+            self.render()
 
     def next_song(self):
         playback_next_song(self.song_files, self.song_idx, self.load_song_by_index, self.render)
 
-    def prev_song(self, go_to_last_page: bool = False):
-        new_page_index = playback_prev_song(
+    def prev_song(self):
+        playback_prev_song(
             self.song_files,
             self.song_idx,
             self.pages,
             self.load_song_by_index,
             self.render,
-            go_to_last_page=go_to_last_page,
         )
-        if new_page_index is not None:
-            self.page_index = new_page_index
 
     def reload_config(self):
         try:
