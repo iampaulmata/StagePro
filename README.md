@@ -59,12 +59,14 @@ StagePro is designed to run reliably on laptops, mini PCs, and dedicated **portr
 - Mode switching (Maintenance ↔ On-Stage)
 - Designed for USB foot pedals and keyboard shortcuts
 
+
 ### 🧠 Smart Metadata
 - Optional **MusicBrainz** integration for metadata autofill
 - Non-destructive updates to song files
 
 ### 🌐 Experimental Online Import
 - Optional **Ultimate Guitar** search/import flow in Maintenance Mode
+- Powered by [`ultimate-api`](https://github.com/joncardasis/ultimate-api) for the Ultimate Guitar search feature
 - Use **Ctrl+G** (or **Edit → Search Ultimate Guitar…**) to open a unified UG import dialog
 - Search, click a result to load **ChordPro preview**, then import exactly that previewed content
 - Optional **Remove all chord annotations** toggle in the UG import dialog strips inline chord tags (e.g. `[C]`, `[Am7]`) and drops chord-only rows in both preview and final import
@@ -209,3 +211,4 @@ See `LICENSE` for details.
 StagePro is actively developed and open to contributions.
 
 Bug reports, feature requests, and pull requests are welcome.
+
