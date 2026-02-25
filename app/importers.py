@@ -15,6 +15,7 @@ actionable error message.
 from __future__ import annotations
 
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple
@@ -172,6 +173,9 @@ def import_user_file_to_chordpro(src: Path) -> ImportedSong:
       from directives (if present). If missing, title/artist will be empty strings.
     - Otherwise, we require the strict fallback header format.
     """
+    if src.suffix.lower() == ".pdf":
+        return _import_pdf_to_chordpro(src)
+
     try:
         text = src.read_text(encoding="utf-8")
     except UnicodeDecodeError:
@@ -200,3 +204,99 @@ def import_user_file_to_chordpro(src: Path) -> ImportedSong:
 
     # Not chordpro (or failed chordpro validation) => strict fallback
     return fallback_import_from_plain_text(text)
+
+
+def _import_pdf_to_chordpro(src: Path) -> ImportedSong:
+    """Extract text from a PDF and wrap it as ChordPro content.
+
+    MVP behavior:
+    - extract page text in order
+    - use PDF metadata title/author when present
+    - wrap into canonical ChordPro with title/artist directives
+    """
+    try:
+        from pypdf import PdfReader
+    except Exception as e:
+        raise ImportErrorWithHint(
+            "Import failed: PDF support requires the 'pypdf' package. "
+            "Install dependencies and try again."
+        ) from e
+
+    try:
+        reader = PdfReader(str(src))
+    except Exception as e:
+        raise ImportErrorWithHint(f"Import failed: unable to read PDF ({e})") from e
+
+    page_texts = []
+    for page in reader.pages:
+        try:
+            page_texts.append(page.extract_text() or "")
+        except Exception:
+            page_texts.append("")
+
+    text = "\n\n".join(t.strip("\n") for t in page_texts).strip()
+    if not text:
+        text = _extract_pdf_text_with_ocr(src)
+
+    if not text:
+        raise ImportErrorWithHint(
+            "Import failed: no extractable text found in PDF. "
+            "OCR fallback also produced no text."
+        )
+
+    meta = reader.metadata or {}
+    title = (getattr(meta, "title", None) or src.stem or "").strip()
+    artist = (getattr(meta, "author", None) or "").strip()
+
+    chordpro = "".join(
+        [
+            f"{{title: {title}}}\n",
+            f"{{artist: {artist}}}\n",
+            "\n",
+            text if text.endswith("\n") else text + "\n",
+        ]
+    )
+    return ImportedSong(title=title, artist=artist, chordpro_text=chordpro)
+
+
+def _extract_pdf_text_with_ocr(src: Path) -> str:
+    """OCR fallback for scanned/image PDFs.
+
+    Requirements:
+    - pytesseract + Pillow + pypdfium2 python packages
+    - system Tesseract binary available on PATH
+    """
+    try:
+        import pypdfium2 as pdfium
+        import pytesseract
+    except Exception as e:
+        raise ImportErrorWithHint(
+            "Import failed: scanned PDF OCR requires optional dependencies "
+            "'pytesseract', 'Pillow', and 'pypdfium2'."
+        ) from e
+
+    if shutil.which("tesseract") is None:
+        raise ImportErrorWithHint(
+            "Import failed: OCR fallback requires the Tesseract binary. "
+            "Install 'tesseract-ocr' on your system and try again."
+        )
+
+    try:
+        pdf = pdfium.PdfDocument(str(src))
+    except Exception as e:
+        raise ImportErrorWithHint(f"Import failed: OCR could not open PDF ({e})") from e
+
+    pages_text = []
+    try:
+        for i in range(len(pdf)):
+            page = pdf[i]
+            bitmap = page.render(scale=2.0)
+            pil_image = bitmap.to_pil()
+            text = pytesseract.image_to_string(pil_image)
+            pages_text.append((text or "").strip())
+            page.close()
+            bitmap.close()
+    finally:
+        pdf.close()
+
+    return "\n\n".join(t for t in pages_text if t).strip()

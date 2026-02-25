@@ -18,7 +18,7 @@ def on_import_clicked(
         parent,
         "Import songs",
         str(songs_dir),
-        "Songs (*.pro *.cho *.chopro *.txt);;All files (*)",
+        "Songs (*.pro *.cho *.chopro *.txt *.pdf);;All files (*)",
     )
     if not files:
         return
@@ -43,7 +43,8 @@ def on_import_clicked(
             imp = import_user_file_to_chordpro(src)
             title = imp.title or src.stem
             artist = imp.artist or "Unknown"
-            dest = choose_destination_path(songs_dir, title, artist, ext=".pro")
+            dest_ext = ".chopro" if src.suffix.lower() == ".pdf" else ".pro"
+            dest = choose_destination_path(songs_dir, title, artist, ext=dest_ext)
             dest.write_text(imp.chordpro_text, encoding="utf-8")
             imported += 1
             add_filename_to_active_playlist_callback(dest.name)
