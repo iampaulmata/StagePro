@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Optional
 
 from PySide6.QtCore import Qt, QTimer, QRect
 from PySide6.QtGui import QKeySequence, QShortcut, QGuiApplication, QCursor, QTextCursor
@@ -71,7 +72,7 @@ def build_song_editor_dialog(parent, title: str, initial_text: str, info_path: P
     layout.addLayout(tag_row)
     layout.addWidget(editor, 1)
 
-    def _insert_text(snippet: str, select_placeholder: str | None = None) -> None:
+    def _insert_text(snippet: str, select_placeholder: Optional[str] = None) -> None:
         cur = editor.textCursor()
 
         # If user has selected text and the snippet contains "{sel}", wrap it.

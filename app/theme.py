@@ -10,6 +10,7 @@ This module is intentionally Qt-agnostic.
 import json
 import html
 from pathlib import Path
+from typing import Optional, Union
 
 
 # Hard fallbacks if theme is missing or incomplete
@@ -57,7 +58,7 @@ _STYLE_ALIASES = {
 }
 
 
-def resolve_theme_path(base_dir: Path, cfg: dict) -> Path | None:
+def resolve_theme_path(base_dir: Path, cfg: dict) -> Optional[Path]:
     theme_ref = (cfg.get("theme") or cfg.get("theme_path") or "").strip()
     if not theme_ref:
         return None
@@ -125,7 +126,7 @@ def resolve_theme_tokens(base_dir: Path, cfg: dict) -> dict:
 
 
 class Theme:
-    def __init__(self, data: dict | None = None):
+    def __init__(self, data: Optional[dict] = None):
         data = data or {}
         self.name = data.get("name", "Default")
         self.colors = data.get("colors", {})
@@ -134,7 +135,7 @@ class Theme:
     # ---------- Loading ----------
 
     @classmethod
-    def load(cls, base_dir=None, path: str | Path | None = None):
+    def load(cls, base_dir=None, path: Optional[Union[str, Path]] = None):
         """
         Load a theme from a JSON file.
 

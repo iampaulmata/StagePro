@@ -2,7 +2,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Tuple
+from typing import Optional, Tuple
 from PySide6.QtCore import QStandardPaths
 
 APP_NAME = "stagepro"
@@ -28,7 +28,7 @@ def _app_base_dir() -> Path:
     # dev mode: stagepro.py is in repo root; config.py is in stagepro/
     return Path(__file__).resolve().parents[1]
 
-def resolve_songs_path(config_songs_path: str | None = None) -> str:
+def resolve_songs_path(config_songs_path: Optional[str] = None) -> str:
     """
     Resolve songs path with portable preference.
 

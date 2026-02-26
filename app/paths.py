@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from typing import Optional
 from PySide6.QtCore import QStandardPaths
 
 from .config import APP_NAME
@@ -53,7 +54,7 @@ def libraries_config_path() -> Path:
     return get_app_data_dir() / "libraries.json"
 
 
-def resolve_library_path(path_str: str | None) -> Path:
+def resolve_library_path(path_str: Optional[str]) -> Path:
     if not path_str:
         return get_app_data_dir()
     p = Path(path_str).expanduser()

@@ -7,7 +7,7 @@ from .chordpro import Song, Block, Line, Token
 SEMANTIC_CONTENT_SECTIONS = {"verse", "chorus", "bridge"}
 
 
-def normalize_content_section_kind(block_kind: str | None) -> str:
+def normalize_content_section_kind(block_kind: Optional[str]) -> str:
     """
     Normalize parser block kinds into renderer semantic section kinds.
 

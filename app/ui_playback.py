@@ -1,3 +1,5 @@
+from typing import Optional
+
 from .render import song_to_chunks
 from .paginate import paginate_to_fit
 
@@ -83,7 +85,7 @@ def render_page(
     return True
 
 
-def next_page(pages: list[str], page_index: int, render_callback, next_song_callback) -> int | None:
+def next_page(pages: list[str], page_index: int, render_callback, next_song_callback) -> Optional[int]:
     if not pages:
         return page_index
     if page_index < len(pages) - 1:
@@ -95,7 +97,7 @@ def next_page(pages: list[str], page_index: int, render_callback, next_song_call
     return page_index
 
 
-def prev_page(pages: list[str], page_index: int, render_callback, prev_song_callback) -> int | None:
+def prev_page(pages: list[str], page_index: int, render_callback, prev_song_callback) -> Optional[int]:
     if not pages:
         return page_index
     if page_index > 0:
